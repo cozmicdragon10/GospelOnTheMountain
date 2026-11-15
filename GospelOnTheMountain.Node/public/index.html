@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GospelOnTheMountain</title>
+</head>
+<body>
+  <h1>GospelOnTheMountain Node server</h1>
+  <p>Status: <span id="status">checking...</span></p>
+  <script>
+    fetch("/api/health")
+      .then((res) => res.json())
+      .then((data) => { document.getElementById("status").textContent = data.status; })
+      .catch(() => { document.getElementById("status").textContent = "unreachable"; });
+  </script>
+</body>
+</html>

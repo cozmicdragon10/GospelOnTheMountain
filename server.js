@@ -1,4 +1,4 @@
-// Minimal static file and JSON web server for GospelOnTheMountain. Uses only Node built-ins.
+// Minimal static file and JSON web server for Worship On The Mountain. Uses only Node built-ins.
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -13,6 +13,7 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
   ".txt": "text/plain; charset=utf-8",
@@ -73,5 +74,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`GospelOnTheMountain Node server listening on http://localhost:${PORT}`);
+  console.log(`Worship On The Mountain Node server listening on http://localhost:${PORT}`);
 });

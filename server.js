@@ -1,10 +1,15 @@
-// Minimal static file and JSON web server for GospelOnTheMountain. Uses only Node built-ins.
+// Minimal static file and JSON web server for Worship On The Mountain. Uses only Node built-ins.
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const { spawn } = require("child_process");
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
+// Shared secret configured in the GitHub webhook. Deploys are refused without it.
+const DEPLOY_SECRET = process.env.DEPLOY_SECRET || "";
+const PID_FILE = path.join(__dirname, "server.pid");
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -13,6 +18,7 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
   ".txt": "text/plain; charset=utf-8",
@@ -47,14 +53,67 @@ function handleApi(req, res, pathname) {
   sendJson(res, 404, { error: "Unknown API route" });
 }
 
+// GitHub webhook: verifies the HMAC signature, then runs deploy.sh detached so it
+// can restart this server without killing itself.
+function handleDeploy(req, res) {
+  if (!DEPLOY_SECRET) {
+    sendJson(res, 503, { error: "Deploy is not configured (DEPLOY_SECRET is not set)" });
+    return;
+  }
+  const chunks = [];
+  let size = 0;
+  req.on("data", (chunk) => {
+    size += chunk.length;
+    if (size > 1024 * 1024) req.destroy();
+    else chunks.push(chunk);
+  });
+  req.on("end", () => {
+    const body = Buffer.concat(chunks);
+    const expected = "sha256=" + crypto.createHmac("sha256", DEPLOY_SECRET).update(body).digest("hex");
+    const given = Buffer.from(req.headers["x-hub-signature-256"] || "");
+    const want = Buffer.from(expected);
+    if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
+      sendJson(res, 401, { error: "Bad signature" });
+      return;
+    }
+    const event = req.headers["x-github-event"];
+    if (event === "ping") {
+      sendJson(res, 200, { status: "pong" });
+      return;
+    }
+    let ref = null;
+    try {
+      ref = JSON.parse(body.toString("utf8")).ref;
+    } catch (_) {
+      // Leave ref null; it is rejected below.
+    }
+    if (event !== "push" || ref !== "refs/heads/main") {
+      sendJson(res, 200, { status: "ignored", event, ref });
+      return;
+    }
+    const child = spawn("bash", [path.join(__dirname, "deploy.sh")], {
+      cwd: __dirname,
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    sendJson(res, 202, { status: "deploying" });
+  });
+}
+
 const server = http.createServer((req, res) => {
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res.writeHead(405, { Allow: "GET, HEAD" });
-    res.end();
+  const { pathname } = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  if (req.method === "POST" && pathname === "/api/deploy") {
+    handleDeploy(req, res);
     return;
   }
 
-  const { pathname } = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405, { Allow: "GET, HEAD, POST" });
+    res.end();
+    return;
+  }
 
   if (pathname.startsWith("/api/")) {
     handleApi(req, res, pathname);
@@ -73,5 +132,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`GospelOnTheMountain Node server listening on http://localhost:${PORT}`);
+  // deploy.sh reads this to know which process to stop on restart.
+  fs.writeFileSync(PID_FILE, String(process.pid));
+  console.log(`Worship On The Mountain Node server listening on http://localhost:${PORT}`);
 });

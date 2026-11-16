@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register - Worship On The Mountain</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+  <header class="topbar">
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="register.html" aria-current="page">Register</a>
+      <a href="donate.html">Donate</a>
+      <a href="about.html">About</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Register</h1>
+    <form id="register-form">
+      <label>Full name
+        <input name="name" type="text" required autocomplete="name">
+      </label>
+      <label>Email
+        <input name="email" type="email" required autocomplete="email">
+      </label>
+      <label>Phone
+        <input name="phone" type="tel" autocomplete="tel">
+      </label>
+      <button type="submit">Register</button>
+    </form>
+    <p id="message" role="status"></p>
+  </main>
+  <footer class="psa">
+    <p><strong>Billy Graham Prayer Line:</strong> Call <a href="tel:18552557729">855-255-PRAY (7729)</a> to reach someone who will pray with you, 24/7.</p>
+    <p><strong>Mental health crisis?</strong> Text <strong>HOME</strong> to <a href="sms:741741">741741</a> for the Crisis Text Line (US), or call <a href="tel:911">911</a> if someone is in immediate danger.</p>
+    <p><strong>Veterans in crisis?</strong> Call <a href="tel:988">988</a> and press 1, or text <a href="sms:838255">838255</a> to reach the Veterans Crisis Line (US), free and available 24/7.</p>
+    <p><strong>Thinking about suicide, or worried about someone?</strong> You are not alone. Call or text <a href="tel:988">988</a> to reach the Suicide &amp; Crisis Lifeline (US), free and available 24/7.</p>
+  </footer>
+  <script>
+    document.getElementById("register-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      document.getElementById("message").textContent = "Thanks for registering! (Saving registrations is not set up yet.)";
+      event.target.reset();
+    });
+  </script>
+</body>
+</html>

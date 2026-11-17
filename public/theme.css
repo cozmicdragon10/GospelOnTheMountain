@@ -157,6 +157,42 @@ main p {
   color: var(--navy-light);
 }
 
+.well-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1.5rem;
+  max-width: 1000px;
+  margin: 2rem auto 0;
+}
+
+.well-row .well {
+  margin: 0;
+  flex: 1 1 320px;
+  max-width: 560px;
+}
+
+.well-row img.well-img {
+  flex: 0 1 auto;
+  align-self: stretch;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  max-width: 45%;
+  object-fit: cover;
+  box-shadow: 0 4px 14px rgba(27, 42, 74, 0.08);
+}
+
+@media (max-width: 600px) {
+  .well-row img.well-img {
+    max-width: 100%;
+    align-self: auto;
+    width: 100%;
+    height: 220px;
+  }
+}
+
 /* Forms */
 form {
   display: grid;

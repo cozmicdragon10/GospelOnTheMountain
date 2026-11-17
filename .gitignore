@@ -5,3 +5,9 @@
 server.pid
 deploy.log
 .env
+
+# Database and its journal files (private runtime data)
+data/app.db
+data/app.db-*
+data/backup*.json
+data/backup*.tmp

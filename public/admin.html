@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin - Worship On The Mountain</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+  <header class="topbar">
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="register.html">Volunteer</a>
+      <a href="donate.html">Donate</a>
+      <a href="about.html">About</a>
+      <a href="admin.html" aria-current="page">Admin</a>
+      <a class="fb-link" href="https://www.facebook.com/share/g/1m96j6o7TW/" target="_blank" rel="noopener" aria-label="Facebook"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg></a>
+    </nav>
+  </header>
+  <main class="admin">
+    <h1>Admin</h1>
+    <p id="message" role="status"></p>
+
+    <section aria-labelledby="add-heading">
+      <h2 id="add-heading">Add a volunteer need</h2>
+      <form id="add-form">
+        <label>Need
+          <input name="name" type="text" required maxlength="100" placeholder="For example: Parking and directions">
+        </label>
+        <label>Description
+          <textarea name="description" rows="3" maxlength="500" placeholder="What the volunteer would do"></textarea>
+        </label>
+        <button type="submit">Add need</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="needs-heading">
+      <h2 id="needs-heading">Volunteer needs</h2>
+      <ul id="needs-list" class="needs-list"></ul>
+    </section>
+  </main>
+  <footer class="psa">
+    <p><strong>Billy Graham Prayer Line:</strong> Call <a href="tel:18552557729">855-255-PRAY (7729)</a> to reach someone who will pray with you, 24/7.</p>
+    <p><strong>Mental health crisis?</strong> Text <strong>HOME</strong> to <a href="sms:741741">741741</a> for the Crisis Text Line (US), or call <a href="tel:911">911</a> if someone is in immediate danger.</p>
+    <p><strong>Veterans in crisis?</strong> Call <a href="tel:988">988</a> and press 1, or text <a href="sms:838255">838255</a> to reach the Veterans Crisis Line (US), free and available 24/7.</p>
+    <p><strong>Thinking about suicide, or worried about someone?</strong> You are not alone. Call or text <a href="tel:988">988</a> to reach the Suicide &amp; Crisis Lifeline (US), free and available 24/7.</p>
+  </footer>
+  <script>
+    const listEl = document.getElementById("needs-list");
+    const messageEl = document.getElementById("message");
+    const addForm = document.getElementById("add-form");
+
+    function say(text) {
+      messageEl.textContent = text;
+    }
+
+    async function api(method, url, body) {
+      const options = { method, headers: {} };
+      if (body !== undefined) {
+        options.headers["Content-Type"] = "application/json";
+        options.body = JSON.stringify(body);
+      }
+      const response = await fetch(url, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Request failed.");
+      return data;
+    }
+
+    function el(tag, props = {}, ...children) {
+      const node = document.createElement(tag);
+      Object.assign(node, props);
+      for (const child of children) node.append(child);
+      return node;
+    }
+
+    function renderVolunteer(needId, volunteer) {
+      const details = [volunteer.email, volunteer.phone].filter(Boolean).join(" | ");
+      const removeButton = el("button", { type: "button", className: "danger", textContent: "Remove" });
+      removeButton.addEventListener("click", async () => {
+        if (!confirm(`Remove ${volunteer.name} from this need?`)) return;
+        try {
+          await api("DELETE", `/api/admin/signups/${volunteer.id}`);
+          say("Volunteer removed.");
+          await load();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      return el(
+        "li",
+        { className: "volunteer" },
+        el("strong", { textContent: volunteer.name }),
+        el("span", { textContent: details ? ` (${details})` : "" }),
+        volunteer.details ? el("p", { className: "volunteer-details", textContent: volunteer.details }) : "",
+        removeButton
+      );
+    }
+
+    function renderNeed(need) {
+      const nameInput = el("input", { name: "name", type: "text", required: true, maxLength: 100, value: need.name });
+      const descInput = el("textarea", { name: "description", rows: 3, maxLength: 500, value: "" });
+      descInput.value = need.description;
+
+      const saveButton = el("button", { type: "submit", textContent: "Save" });
+      const deleteButton = el("button", { type: "button", className: "danger", textContent: "Delete need" });
+
+      const form = el(
+        "form",
+        { className: "need-edit" },
+        el("label", {}, "Need", nameInput),
+        el("label", {}, "Description", descInput),
+        el("div", { className: "need-actions" }, saveButton, deleteButton)
+      );
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await api("PUT", `/api/admin/needs/${need.id}`, {
+            name: nameInput.value,
+            description: descInput.value,
+          });
+          say("Need saved.");
+          await load();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+
+      deleteButton.addEventListener("click", async () => {
+        if (!confirm(`Delete the need "${need.name}"?`)) return;
+        try {
+          await api("DELETE", `/api/admin/needs/${need.id}`);
+          say("Need deleted.");
+          await load();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+
+      const volunteersList = el("ul", { className: "volunteers" });
+      if (need.volunteers.length) {
+        for (const volunteer of need.volunteers) volunteersList.append(renderVolunteer(need.id, volunteer));
+      } else {
+        volunteersList.append(el("li", { className: "volunteer", textContent: "No volunteers yet." }));
+      }
+
+      return el(
+        "li",
+        { className: "need" },
+        form,
+        el("h3", { textContent: `Volunteers (${need.volunteers.length})` }),
+        volunteersList
+      );
+    }
+
+    async function load() {
+      try {
+        const needs = await api("GET", "/api/admin/needs");
+        listEl.replaceChildren(...needs.map(renderNeed));
+        if (!needs.length) listEl.append(el("li", { className: "need", textContent: "No needs yet." }));
+      } catch (err) {
+        say(err.message);
+      }
+    }
+
+    addForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(addForm));
+      try {
+        await api("POST", "/api/admin/needs", data);
+        addForm.reset();
+        say("Need added.");
+        await load();
+      } catch (err) {
+        say(err.message);
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

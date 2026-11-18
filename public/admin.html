@@ -14,6 +14,7 @@
     <nav>
       <a href="index.html">Home</a>
       <a href="register.html">Volunteer</a>
+      <a href="artists.html">Artists</a>
       <a href="donate.html">Donate</a>
       <a href="about.html">About</a>
       <a href="admin.html" aria-current="page">Admin</a>
@@ -40,6 +41,40 @@
     <section aria-labelledby="needs-heading">
       <h2 id="needs-heading">Volunteer needs</h2>
       <ul id="needs-list" class="needs-list"></ul>
+    </section>
+    <section aria-labelledby="add-performance-heading">
+      <h2 id="add-performance-heading">Add a performance</h2>
+      <form id="performance-form">
+        <label>Linked artist (gets lineup emails)
+          <select name="artistId" id="performance-artist-select">
+            <option value="">Not linked (no emails)</option>
+          </select>
+        </label>
+        <label>Performer
+          <input name="artist" type="text" required maxlength="100" placeholder="Artist, band or choir">
+        </label>
+        <label>Title
+          <input name="title" type="text" maxlength="150" placeholder="For example: Opening worship set">
+        </label>
+        <label>Time
+          <input name="time" type="text" maxlength="100" placeholder="For example: Saturday, 2:00 PM">
+        </label>
+        <label>Description
+          <textarea name="description" rows="5" maxlength="1500"></textarea>
+        </label>
+        <button type="submit">Add performance</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="performances-heading">
+      <h2 id="performances-heading">Performances</h2>
+      <ul id="performances-list" class="needs-list"></ul>
+    </section>
+
+    <section aria-labelledby="artists-heading">
+      <h2 id="artists-heading">Artist submissions</h2>
+      <p>Approved artists appear on the Artists page with their name, about and services. Email and needs are never shown publicly.</p>
+      <ul id="artists-list" class="needs-list"></ul>
     </section>
   </main>
   <footer class="psa">
@@ -76,9 +111,47 @@
       return node;
     }
 
-    function renderVolunteer(needId, volunteer) {
+    function renderVolunteer(needId, volunteer, needs) {
       const details = [volunteer.email, volunteer.phone].filter(Boolean).join(" | ");
       const removeButton = el("button", { type: "button", className: "danger", textContent: "Remove" });
+
+      const fields = {
+        name: el("input", { type: "text", required: true, maxLength: 100, value: volunteer.name }),
+        email: el("input", { type: "email", required: true, maxLength: 200, value: volunteer.email }),
+        phone: el("input", { type: "tel", maxLength: 30, value: volunteer.phone }),
+        needId: el("select", { required: true }),
+        details: el("textarea", { rows: 3, maxLength: 500 }),
+      };
+      for (const need of needs) fields.needId.append(el("option", { value: need.id, textContent: need.name }));
+      fields.needId.value = needId;
+      fields.details.value = volunteer.details;
+      const editForm = el(
+        "form",
+        { className: "need-edit" },
+        el("label", {}, "Name", fields.name),
+        el("label", {}, "Email", fields.email),
+        el("label", {}, "Phone", fields.phone),
+        el("label", {}, "Volunteer need", fields.needId),
+        el("label", {}, "How they would like to help", fields.details),
+        el("div", { className: "need-actions" }, el("button", { type: "submit", textContent: "Save volunteer" }))
+      );
+      editForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await api("PUT", `/api/admin/signups/${volunteer.id}`, {
+            name: fields.name.value,
+            email: fields.email.value,
+            phone: fields.phone.value,
+            needId: fields.needId.value,
+            details: fields.details.value,
+          });
+          say("Volunteer saved.");
+          await load();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      const editor = el("details", { className: "edit-details" }, el("summary", { textContent: "Edit" }), editForm);
       removeButton.addEventListener("click", async () => {
         if (!confirm(`Remove ${volunteer.name} from this need?`)) return;
         try {
@@ -95,11 +168,12 @@
         el("strong", { textContent: volunteer.name }),
         el("span", { textContent: details ? ` (${details})` : "" }),
         volunteer.details ? el("p", { className: "volunteer-details", textContent: volunteer.details }) : "",
-        removeButton
+        removeButton,
+        editor
       );
     }
 
-    function renderNeed(need) {
+    function renderNeed(need, needs) {
       const nameInput = el("input", { name: "name", type: "text", required: true, maxLength: 100, value: need.name });
       const descInput = el("textarea", { name: "description", rows: 3, maxLength: 500, value: "" });
       descInput.value = need.description;
@@ -142,7 +216,7 @@
 
       const volunteersList = el("ul", { className: "volunteers" });
       if (need.volunteers.length) {
-        for (const volunteer of need.volunteers) volunteersList.append(renderVolunteer(need.id, volunteer));
+        for (const volunteer of need.volunteers) volunteersList.append(renderVolunteer(need.id, volunteer, needs));
       } else {
         volunteersList.append(el("li", { className: "volunteer", textContent: "No volunteers yet." }));
       }
@@ -159,7 +233,7 @@
     async function load() {
       try {
         const needs = await api("GET", "/api/admin/needs");
-        listEl.replaceChildren(...needs.map(renderNeed));
+        listEl.replaceChildren(...needs.map((need) => renderNeed(need, needs)));
         if (!needs.length) listEl.append(el("li", { className: "need", textContent: "No needs yet." }));
       } catch (err) {
         say(err.message);
@@ -179,7 +253,283 @@
       }
     });
 
+    // ---------- Performances ----------
+
+    const performancesEl = document.getElementById("performances-list");
+    const performanceForm = document.getElementById("performance-form");
+    const performanceArtistSelect = document.getElementById("performance-artist-select");
+    // Artist records, used for the "Linked artist" dropdowns. Filled by loadArtists().
+    let artistsCache = [];
+
+    function artistSelect(selectedId) {
+      const select = el("select", {}, el("option", { value: "", textContent: "Not linked (no emails)" }));
+      for (const a of artistsCache) select.append(el("option", { value: String(a.id), textContent: `${a.name} (${a.email})` }));
+      select.value = selectedId ? String(selectedId) : "";
+      // A link to an artist that was removed shows as not linked.
+      if (select.value !== (selectedId ? String(selectedId) : "")) select.value = "";
+      return select;
+    }
+
+    // Describes a lineup email result from the server for the status message.
+    function lineupEmailNote(result, name, added) {
+      const what = added ? "added to the lineup" : "removed from the lineup";
+      if (result === "sending") return ` An email letting ${name} know they were ${what} is being sent.`;
+      if (result === "not-configured") return " No email was sent because email is not set up on the server.";
+      return "";
+    }
+
+    function artistName(id) {
+      return artistsCache.find((a) => a.id === Number(id))?.name || "the artist";
+    }
+
+    performanceArtistSelect.addEventListener("change", () => {
+      // Fill in the performer name and description from the chosen artist when they are empty.
+      const chosen = artistsCache.find((a) => String(a.id) === performanceArtistSelect.value);
+      if (!chosen) return;
+      const { artist: performer, description } = performanceForm.elements;
+      if (!performer.value) performer.value = chosen.name;
+      if (!description.value) description.value = chosen.about;
+    });
+
+    function renderPerformance(p) {
+      const fields = {
+        artist: el("input", { type: "text", required: true, maxLength: 100, value: p.artist }),
+        title: el("input", { type: "text", maxLength: 150, value: p.title }),
+        time: el("input", { type: "text", maxLength: 100, value: p.time }),
+        description: el("textarea", { rows: 5, maxLength: 1500 }),
+        artistId: artistSelect(p.artist_id),
+      };
+      fields.description.value = p.description;
+      const deleteButton = el("button", { type: "button", className: "danger", textContent: "Delete performance" });
+      const visibilityButton = el("button", { type: "button", textContent: p.visible ? "Hide" : "Show" });
+      visibilityButton.addEventListener("click", async () => {
+        try {
+          await api("PUT", `/api/admin/performances/${p.id}/visibility`, { visible: !p.visible });
+          say(p.visible ? `${p.artist}'s performance is hidden from the Artists page.` : `${p.artist}'s performance is now on the Artists page.`);
+          await loadPerformances();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      const form = el(
+        "form",
+        { className: "need-edit" },
+        el("label", {}, "Linked artist (gets lineup emails)", fields.artistId),
+        el("label", {}, "Performer", fields.artist),
+        el("label", {}, "Title", fields.title),
+        el("label", {}, "Time", fields.time),
+        el("label", {}, "Description", fields.description),
+        el(
+          "div",
+          { className: "need-actions" },
+          el("button", { type: "submit", textContent: "Save" }),
+          visibilityButton,
+          deleteButton
+        )
+      );
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          const result = await api("PUT", `/api/admin/performances/${p.id}`, {
+            artist: fields.artist.value,
+            title: fields.title.value,
+            time: fields.time.value,
+            description: fields.description.value,
+            artistId: fields.artistId.value,
+          });
+          say(
+            "Performance saved." +
+              lineupEmailNote(result.emails.removed, artistName(p.artist_id), false) +
+              lineupEmailNote(result.emails.added, artistName(fields.artistId.value), true) +
+              (result.emails.timeChanged === "sending"
+                ? ` An email letting ${artistName(fields.artistId.value)} know about the new time is being sent.`
+                : result.emails.timeChanged === "not-configured"
+                  ? " No time-change email was sent because email is not set up on the server."
+                  : "")
+          );
+          await loadPerformances();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      deleteButton.addEventListener("click", async () => {
+        const warning = p.artist_id ? ` ${artistName(p.artist_id)} will be emailed that they were removed from the lineup.` : "";
+        if (!confirm(`Delete the performance by ${p.artist}?${warning}`)) return;
+        try {
+          const result = await api("DELETE", `/api/admin/performances/${p.id}`);
+          say("Performance deleted." + lineupEmailNote(result.email, artistName(p.artist_id), false));
+          await loadPerformances();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      return el(
+        "li",
+        { className: p.visible ? "need" : "need is-hidden" },
+        el("h3", { textContent: `${p.artist}${p.visible ? " (on the Artists page)" : " (hidden)"}` }),
+        form
+      );
+    }
+
+    async function loadPerformances() {
+      try {
+        const performances = await api("GET", "/api/admin/performances");
+        performancesEl.replaceChildren(...performances.map(renderPerformance));
+        if (!performances.length) performancesEl.append(el("li", { className: "need", textContent: "No performances yet." }));
+      } catch (err) {
+        say(err.message);
+      }
+    }
+
+    performanceForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = Object.fromEntries(new FormData(performanceForm));
+        const result = await api("POST", "/api/admin/performances", data);
+        performanceForm.reset();
+        say("Performance added." + lineupEmailNote(result.email, artistName(data.artistId), true));
+        await loadPerformances();
+      } catch (err) {
+        say(err.message);
+      }
+    });
+
+    // ---------- Artist submissions ----------
+
+    const artistsEl = document.getElementById("artists-list");
+    const ROLE_LABELS = { perform: "Perform", help: "Help out", both: "Perform and help out" };
+
+    function labeled(label, text) {
+      return el("p", {}, el("strong", { textContent: `${label}: ` }), text || "(none)");
+    }
+
+    function renderArtist(a) {
+      const fields = {
+        name: el("input", { type: "text", required: true, maxLength: 100, value: a.name }),
+        about: el("textarea", { rows: 6, required: true, maxLength: 1500 }),
+        email: el("input", { type: "email", required: true, maxLength: 200, value: a.email }),
+        role: el("select", { required: true }),
+        services: el("textarea", { rows: 3, required: true, maxLength: 500 }),
+        needs: el("textarea", { rows: 3, maxLength: 500 }),
+      };
+      fields.about.value = a.about;
+      fields.services.value = a.services;
+      fields.needs.value = a.needs;
+      for (const [value, label] of Object.entries(ROLE_LABELS)) fields.role.append(el("option", { value, textContent: label }));
+      fields.role.value = a.role;
+
+      const toggleButton = el("button", { type: "button", textContent: a.approved ? "Hide from Artists page" : "Approve" });
+      const performButton = el("button", { type: "button", textContent: "Add to performances" });
+      const removeButton = el("button", { type: "button", className: "danger", textContent: "Remove" });
+
+      const form = el(
+        "form",
+        { className: "need-edit" },
+        el("label", {}, "Artist name", fields.name),
+        el("label", {}, "About", fields.about),
+        el("label", {}, "Contact email", fields.email),
+        el("label", {}, "Wants to", fields.role),
+        el("label", {}, "Services offered", fields.services),
+        el("label", {}, "Needs", fields.needs),
+        el(
+          "div",
+          { className: "need-actions" },
+          el("button", { type: "submit", textContent: "Save artist" }),
+          toggleButton,
+          performButton,
+          removeButton
+        )
+      );
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await api("PUT", `/api/admin/artists/${a.id}`, {
+            name: fields.name.value,
+            about: fields.about.value,
+            email: fields.email.value,
+            role: fields.role.value,
+            services: fields.services.value,
+            needs: fields.needs.value,
+          });
+          say("Artist saved.");
+          await loadArtists();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      toggleButton.addEventListener("click", async () => {
+        try {
+          const result = await api("PUT", `/api/admin/artists/${a.id}/approval`, { approved: !a.approved });
+          const emailNotes = {
+            sending: ` An approval email is being sent to ${result.to}.`,
+            "already-sent": " They were already sent an approval email before, so no new email was sent.",
+            "not-configured": " No approval email was sent because email is not set up on the server.",
+          };
+          say(
+            a.approved
+              ? `${a.name} is hidden from the Artists page.`
+              : `${a.name} is now on the Artists page.${emailNotes[result.email] || ""}`
+          );
+          await loadArtists();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      performButton.addEventListener("click", async () => {
+        try {
+          const result = await api("POST", "/api/admin/performances", {
+            artist: a.name,
+            artistId: a.id,
+            description: a.about,
+          });
+          say(
+            `${a.name} was added to the performances. Set the title and time in the Performances list.` +
+              lineupEmailNote(result.email, a.name, true)
+          );
+          await loadPerformances();
+          performancesEl.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "center" });
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      removeButton.addEventListener("click", async () => {
+        if (!confirm(`Remove ${a.name}'s submission?`)) return;
+        try {
+          await api("DELETE", `/api/admin/artists/${a.id}`);
+          say("Artist removed.");
+          await loadArtists();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      return el(
+        "li",
+        { className: "need" },
+        el("h3", { textContent: `${a.name}${a.approved ? " (on the Artists page)" : " (awaiting approval)"}` }),
+        labeled("Submitted", new Date(a.submitted_at).toLocaleString()),
+        form
+      );
+    }
+
+    async function loadArtists() {
+      try {
+        const artists = await api("GET", "/api/admin/artists");
+        artistsCache = artists;
+        const chosen = performanceArtistSelect.value;
+        performanceArtistSelect.replaceChildren(el("option", { value: "", textContent: "Not linked (no emails)" }));
+        for (const a of artists) performanceArtistSelect.append(el("option", { value: String(a.id), textContent: `${a.name} (${a.email})` }));
+        performanceArtistSelect.value = artists.some((a) => String(a.id) === chosen) ? chosen : "";
+        await loadPerformances();
+        artistsEl.replaceChildren(...artists.map(renderArtist));
+        if (!artists.length) artistsEl.append(el("li", { className: "need", textContent: "No artist submissions yet." }));
+      } catch (err) {
+        say(err.message);
+      }
+    }
+
     load();
+    loadArtists();
   </script>
 </body>
 </html>

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Artists - Worship On The Mountain</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+  <header class="topbar">
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="register.html">Volunteer</a>
+      <a href="artists.html" aria-current="page">Artists</a>
+      <a href="donate.html">Donate</a>
+      <a href="about.html">About</a>
+      <a href="admin.html">Admin</a>
+      <a class="fb-link" href="https://www.facebook.com/share/g/1m96j6o7TW/" target="_blank" rel="noopener" aria-label="Facebook"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg></a>
+    </nav>
+  </header>
+  <main>
+    <h1>Artists</h1>
+    <p>Worship groups, choirs, bands and solo artists coming together to lift up His name on the mountain. Here is who is performing, and the artists who have joined us.</p>
+
+    <section aria-labelledby="performances-heading">
+      <div class="labeled-rule" role="separator"><span id="performances-heading">Performances</span></div>
+      <ul id="performances-list" class="needs-list">
+        <li class="need"><p>Loading performances...</p></li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="artists-heading">
+      <div class="labeled-rule" role="separator"><span id="artists-heading">Our Artists</span></div>
+      <ul id="artists-list" class="needs-list">
+        <li class="need"><p>Loading artists...</p></li>
+      </ul>
+    </section>
+
+    <section class="signup" aria-labelledby="artist-signup-heading">
+      <h2 id="artist-signup-heading">Perform or help out</h2>
+      <p>Are you an artist who would like to perform, or help out with the festival? Tell us about yourself and we will be in touch. Your email and needs are only seen by the organizers.</p>
+      <form id="artist-form">
+        <label>Artist name
+          <input name="name" type="text" required maxlength="100" placeholder="Your name, band or group">
+        </label>
+        <label>About
+          <textarea name="about" rows="5" required maxlength="1500" placeholder="Tell us about you or your group, your music and your ministry."></textarea>
+        </label>
+        <label>Contact email
+          <input name="email" type="email" required maxlength="200" autocomplete="email">
+        </label>
+        <label>I would like to
+          <select name="role" required>
+            <option value="perform">Perform</option>
+            <option value="help">Help out</option>
+            <option value="both">Perform and help out</option>
+          </select>
+        </label>
+        <label>Services offered
+          <textarea name="services" rows="3" required maxlength="500" placeholder="For example: 30-minute worship set, lead a choir, run sound, bring a PA system."></textarea>
+        </label>
+        <label>Anything you need?
+          <textarea name="needs" rows="3" maxlength="500" placeholder="For example: power outlets, a keyboard, a drum kit, stage time in the morning, travel help."></textarea>
+        </label>
+        <button type="submit">Send</button>
+      </form>
+      <p id="message" role="status"></p>
+    </section>
+  </main>
+  <footer class="psa">
+    <p><strong>Billy Graham Prayer Line:</strong> Call <a href="tel:18552557729">855-255-PRAY (7729)</a> to reach someone who will pray with you, 24/7.</p>
+    <p><strong>Mental health crisis?</strong> Text <strong>HOME</strong> to <a href="sms:741741">741741</a> for the Crisis Text Line (US), or call <a href="tel:911">911</a> if someone is in immediate danger.</p>
+    <p><strong>Veterans in crisis?</strong> Call <a href="tel:988">988</a> and press 1, or text <a href="sms:838255">838255</a> to reach the Veterans Crisis Line (US), free and available 24/7.</p>
+    <p><strong>Thinking about suicide, or worried about someone?</strong> You are not alone. Call or text <a href="tel:988">988</a> to reach the Suicide &amp; Crisis Lifeline (US), free and available 24/7.</p>
+  </footer>
+  <script>
+    const performancesEl = document.getElementById("performances-list");
+    const artistsEl = document.getElementById("artists-list");
+    const messageEl = document.getElementById("message");
+    const form = document.getElementById("artist-form");
+
+    const ROLE_LABELS = { perform: "Performing", help: "Helping out", both: "Performing and helping out" };
+
+    function el(tag, props = {}, ...children) {
+      const node = document.createElement(tag);
+      Object.assign(node, props);
+      for (const child of children) node.append(child);
+      return node;
+    }
+
+    function note(listEl, text) {
+      listEl.replaceChildren(el("li", { className: "need" }, el("p", { textContent: text })));
+    }
+
+    function renderPerformances(performances) {
+      if (!performances.length) return note(performancesEl, "The lineup is coming soon. Check back for the schedule!");
+      performancesEl.replaceChildren(
+        ...performances.map((p) =>
+          el(
+            "li",
+            { className: "need" },
+            el("h3", { textContent: p.title ? `${p.artist}: ${p.title}` : p.artist }),
+            p.time ? el("p", { className: "need-volunteers-heading", textContent: p.time }) : "",
+            p.description ? el("p", { className: "artist-about", textContent: p.description }) : ""
+          )
+        )
+      );
+    }
+
+    function renderArtists(artists) {
+      if (!artists.length) return note(artistsEl, "No artists listed yet. Be the first to join us!");
+      artistsEl.replaceChildren(
+        ...artists.map((a) =>
+          el(
+            "li",
+            { className: "need" },
+            el("h3", { textContent: a.name }),
+            el("p", { className: "need-volunteers-heading", textContent: ROLE_LABELS[a.role] || "" }),
+            el("p", { className: "artist-about", textContent: a.about }),
+            a.services ? el("p", {}, el("strong", { textContent: "Offering: " }), a.services) : ""
+          )
+        )
+      );
+    }
+
+    async function load() {
+      try {
+        const response = await fetch("/api/artists");
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        renderPerformances(data.performances);
+        renderArtists(data.artists);
+      } catch (_) {
+        note(performancesEl, "Performances could not be loaded right now. Please try again later.");
+        note(artistsEl, "Artists could not be loaded right now. Please try again later.");
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(form));
+      messageEl.textContent = "Sending...";
+      try {
+        const response = await fetch("/api/artists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Something went wrong.");
+        messageEl.textContent = "Thank you! We received your information and will be in touch soon.";
+        form.reset();
+      } catch (err) {
+        messageEl.textContent = err.message || "Something went wrong. Please try again.";
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

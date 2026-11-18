@@ -139,6 +139,12 @@ main p {
   box-shadow: 0 4px 14px rgba(27, 42, 74, 0.08);
 }
 
+.well h2 {
+  margin: 0 0 0.75rem;
+  color: var(--navy);
+  text-align: center;
+}
+
 .well p {
   margin: 0;
   font-family: "Cormorant Garamond", "Times New Roman", serif;
@@ -197,6 +203,26 @@ main p {
     width: 100%;
     height: 220px;
   }
+}
+
+/* Horizontal rule with a centered label */
+.labeled-rule {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 2rem auto;
+  max-width: 60%;
+  color: var(--navy);
+  font-family: "Cormorant Garamond", "Times New Roman", serif;
+  font-size: 1.3rem;
+}
+
+.labeled-rule::before,
+.labeled-rule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
 }
 
 /* Volunteer needs */

@@ -4,7 +4,7 @@ Worship On The Mountain
 
     DEPLOY_SECRET=<long random string> ./run.sh
 
-Set `PORT` to change the port (default 80; ports below 1024 may need extra permission on some systems).
+Set `PORT` to change the port (default 3000).
 
 ## Deploy from GitHub
 

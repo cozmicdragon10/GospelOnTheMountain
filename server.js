@@ -21,7 +21,7 @@ try {
   process.exit(1);
 }
 
-const PORT = Number(process.env.PORT) || 80;
+const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 // Shared secret configured in the GitHub webhook. Deploys are refused without it.
 const DEPLOY_SECRET = process.env.DEPLOY_SECRET || "";

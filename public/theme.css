@@ -352,14 +352,18 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+textarea,
+select {
   padding: 0.55rem;
   font: inherit;
   border: 1px solid #cfc6a8;
   background: var(--cream);
 }
 
-input:focus {
+input:focus,
+textarea:focus,
+select:focus {
   outline: 2px solid var(--gold);
   border-color: var(--gold);
 }
@@ -411,4 +415,26 @@ footer.psa strong {
 footer.psa a {
   color: var(--gold-light);
   font-weight: bold;
+}
+
+/* Artists page */
+.artist-about {
+  white-space: pre-line;
+}
+
+/* Admin: collapsible edit forms */
+.edit-details {
+  flex-basis: 100%;
+}
+
+.edit-details summary {
+  cursor: pointer;
+  color: var(--navy-light);
+  font-weight: 600;
+}
+
+/* Admin: hidden performances are dimmed */
+.need.is-hidden {
+  opacity: 0.7;
+  border-left-style: dashed;
 }

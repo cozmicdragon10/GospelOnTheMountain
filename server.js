@@ -6,7 +6,13 @@ const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const { sendMail, mailIsConfigured } = require("./mailer");
-const { buildThankYouEmail } = require("./thank-you");
+const {
+  buildThankYouEmail,
+  buildArtistThankYouEmail,
+  buildArtistApprovalEmail,
+  buildLineupEmail,
+  buildTimeChangeEmail,
+} = require("./thank-you");
 let DatabaseSync;
 try {
   ({ DatabaseSync } = require("node:sqlite"));
@@ -19,6 +25,8 @@ const PORT = Number(process.env.PORT) || 80;
 const PUBLIC_DIR = path.join(__dirname, "public");
 // Shared secret configured in the GitHub webhook. Deploys are refused without it.
 const DEPLOY_SECRET = process.env.DEPLOY_SECRET || "";
+// Optional public address of the site (for example https://example.org), used for links in emails.
+const SITE_URL = process.env.SITE_URL || "";
 // Password for the admin pages (username can be anything). Admin is disabled when unset.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const PID_FILE = path.join(__dirname, "server.pid");
@@ -66,7 +74,41 @@ db.exec(`
     details TEXT NOT NULL DEFAULT '',
     signed_up_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS artists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    about TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'perform',
+    services TEXT NOT NULL DEFAULT '',
+    needs TEXT NOT NULL DEFAULT '',
+    approved INTEGER NOT NULL DEFAULT 0,
+    submitted_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS performances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    time TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    visible INTEGER NOT NULL DEFAULT 1
+  );
 `);
+// Databases created before approval emails need a column recording when one was sent.
+// Artists already approved at that point are marked as handled so they are not emailed after the fact.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('artists') WHERE name = 'approval_emailed_at'").get()) {
+  db.exec("ALTER TABLE artists ADD COLUMN approval_emailed_at TEXT NOT NULL DEFAULT ''");
+  db.exec("UPDATE artists SET approval_emailed_at = 'before-approval-emails' WHERE approved = 1");
+}
+// Databases created before performances could be hidden need the visible column added.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('performances') WHERE name = 'visible'").get()) {
+  db.exec("ALTER TABLE performances ADD COLUMN visible INTEGER NOT NULL DEFAULT 1");
+}
+// Links a performance to an artist record so lineup emails can reach them. Blank means not linked.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('performances') WHERE name = 'artist_id'").get()) {
+  db.exec("ALTER TABLE performances ADD COLUMN artist_id INTEGER");
+}
 
 // Needs listed on the home page, loaded once when the database is first created.
 const INITIAL_NEEDS = [
@@ -85,6 +127,14 @@ function buildSnapshot() {
     exportedAt: new Date().toISOString(),
     needs: db.prepare("SELECT id, name, description, position FROM needs ORDER BY position, name").all(),
     signups: db.prepare("SELECT id, need_id, name, email, phone, details, signed_up_at FROM signups ORDER BY id").all(),
+    artists: db
+      .prepare(
+        "SELECT id, name, about, email, role, services, needs, approved, submitted_at, approval_emailed_at FROM artists ORDER BY id"
+      )
+      .all(),
+    performances: db
+      .prepare("SELECT id, artist, title, time, description, position, visible, artist_id FROM performances ORDER BY id")
+      .all(),
   };
 }
 
@@ -125,6 +175,23 @@ function loadSnapshot(snapshot) {
     for (const s of snapshot.signups) {
       insertSignup.run(s.id, s.need_id, s.name, s.email, s.phone || "", s.details || "", s.signed_up_at);
     }
+    // Artists and performances were added later, so older backups may not have them.
+    const insertArtist = db.prepare(
+      "INSERT INTO artists (id, name, about, email, role, services, needs, approved, submitted_at, approval_emailed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    for (const a of snapshot.artists || []) {
+      // Older backups lack approval_emailed_at; treat their approved artists as already notified.
+      const emailed = a.approval_emailed_at ?? (a.approved ? "before-approval-emails" : "");
+      insertArtist.run(a.id, a.name, a.about || "", a.email, a.role || "perform", a.services || "", a.needs || "", a.approved ? 1 : 0, a.submitted_at, emailed);
+    }
+    const insertPerformance = db.prepare(
+      "INSERT INTO performances (id, artist, title, time, description, position, visible, artist_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    for (const p of snapshot.performances || []) {
+      const visible = p.visible === undefined || p.visible ? 1 : 0;
+      const artistId = p.artist_id ?? null;
+      insertPerformance.run(p.id, p.artist, p.title || "", p.time || "", p.description || "", p.position || 0, visible, artistId);
+    }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -146,6 +213,35 @@ function initializeStore() {
   db.prepare("INSERT INTO meta (key, value) VALUES ('needs_seeded', '1')").run();
 }
 initializeStore();
+
+// First artist listing: the event organizer, written from his story on the About page.
+const SEED_ARTIST = {
+  name: "Samuel Wright Jr.",
+  about:
+    "Samuel Kenneth Wright Jr. is a 38-year-old gospel country music artist from Lewisburg, Tennessee, and the organizer of Worship On The Mountain. He grew up tobacco farming, then worked in welding and fabrication, before answering the call of the Lord and Savior Jesus Christ to lead men.\n\n" +
+    "He is a father, a brother, an uncle, a cousin, a friend, a husband, and most of all, a man of God. Samuel speaks openly about his own mental health journey, from foster homes to inpatient facilities, and he wants to take the fear of asking for help away from everybody.",
+  email: "outlawlife21@icloud.com",
+  role: "both",
+  services:
+    "Gospel country music performance. Organizing the festival and bringing together the worship groups, choirs, bands and volunteers.",
+  needs: "",
+};
+// Where the one-time review copy of the seed artist's thank-you email goes.
+const SEED_REVIEW_EMAIL = "cozmicdragon10@gmail.com";
+
+// Adds the seed artist once, unless artists already exist (for example, restored from backup.json).
+function seedArtists() {
+  if (db.prepare("SELECT 1 FROM meta WHERE key = 'artists_seeded'").get()) return;
+  if (!db.prepare("SELECT 1 FROM artists LIMIT 1").get()) {
+    const a = SEED_ARTIST;
+    db.prepare(
+      "INSERT INTO artists (name, about, email, role, services, needs, approved, submitted_at, approval_emailed_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'seed')"
+    ).run(a.name, a.about, a.email, a.role, a.services, a.needs, new Date().toISOString());
+    console.log(`Added ${a.name} to the artists list`);
+  }
+  db.prepare("INSERT INTO meta (key, value) VALUES ('artists_seeded', '1')").run();
+}
+seedArtists();
 dumpToJson();
 
 const stmt = {
@@ -163,6 +259,39 @@ const stmt = {
     "INSERT INTO signups (need_id, name, email, phone, details, signed_up_at) VALUES (?, ?, ?, ?, ?, ?)"
   ),
   deleteSignup: db.prepare("DELETE FROM signups WHERE id = ?"),
+  listApprovedArtists: db.prepare(
+    "SELECT name, about, role, services FROM artists WHERE approved = 1 ORDER BY name COLLATE NOCASE"
+  ),
+  listAllArtists: db.prepare(
+    "SELECT id, name, about, email, role, services, needs, approved, submitted_at FROM artists ORDER BY submitted_at DESC, id DESC"
+  ),
+  insertArtist: db.prepare(
+    "INSERT INTO artists (name, about, email, role, services, needs, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ),
+  setArtistApproved: db.prepare("UPDATE artists SET approved = ? WHERE id = ?"),
+  getArtist: db.prepare("SELECT id, name, email, role, approval_emailed_at FROM artists WHERE id = ?"),
+  setApprovalEmailed: db.prepare("UPDATE artists SET approval_emailed_at = ? WHERE id = ?"),
+  updateArtist: db.prepare(
+    "UPDATE artists SET name = ?, about = ?, email = ?, role = ?, services = ?, needs = ? WHERE id = ?"
+  ),
+  updateSignup: db.prepare("UPDATE signups SET need_id = ?, name = ?, email = ?, phone = ?, details = ? WHERE id = ?"),
+  deleteArtist: db.prepare("DELETE FROM artists WHERE id = ?"),
+  listVisiblePerformances: db.prepare(
+    "SELECT id, artist, title, time, description FROM performances WHERE visible = 1 ORDER BY position, id"
+  ),
+  listAllPerformances: db.prepare(
+    "SELECT id, artist, title, time, description, visible, artist_id FROM performances ORDER BY position, id"
+  ),
+  setPerformanceVisible: db.prepare("UPDATE performances SET visible = ? WHERE id = ?"),
+  nextPerformancePosition: db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM performances"),
+  insertPerformance: db.prepare(
+    "INSERT INTO performances (artist, title, time, description, position, artist_id) VALUES (?, ?, ?, ?, ?, ?)"
+  ),
+  getPerformance: db.prepare("SELECT id, artist, title, time, description, artist_id FROM performances WHERE id = ?"),
+  updatePerformance: db.prepare(
+    "UPDATE performances SET artist = ?, title = ?, time = ?, description = ?, artist_id = ? WHERE id = ?"
+  ),
+  deletePerformance: db.prepare("DELETE FROM performances WHERE id = ?"),
 };
 
 // Needs with their volunteers. The public view shows names only; the admin view adds contact details.
@@ -302,6 +431,112 @@ function handleVolunteer(req, res) {
   });
 }
 
+// ---------- Public artist API ----------
+
+const ARTIST_ROLES = ["perform", "help", "both"];
+
+// Sends the artist thank-you email in the background. Failures are logged and never affect the submission.
+function sendArtistThankYou({ name, email, role, services, needs }) {
+  if (!mailIsConfigured()) {
+    console.log("Artist thank-you email skipped: SMTP_USER and SMTP_PASS are not set.");
+    return;
+  }
+  const message = buildArtistThankYouEmail({ name, role, services, needs });
+  sendMail({ to: email, subject: message.subject, text: message.text, html: message.html, images: message.images })
+    .then(() => console.log(`Artist thank-you email sent to ${email}`))
+    .catch((err) => console.error(`Artist thank-you email to ${email} failed: ${err.message}`));
+}
+
+// Used by the public form and the admin edit form.
+function validateArtist(body) {
+  const name = textField(body, "name");
+  const about = textField(body, "about");
+  const email = textField(body, "email");
+  const role = textField(body, "role");
+  const services = textField(body, "services");
+  const needs = textField(body, "needs");
+  if (!name || name.length > 100) return { error: "Please enter the artist name (100 characters or fewer)." };
+  if (!about || about.length > 1500) return { error: "Please fill in the about section (1500 characters or fewer)." };
+  if (!EMAIL_PATTERN.test(email) || email.length > 200) return { error: "Please enter a valid email address." };
+  if (!ARTIST_ROLES.includes(role)) return { error: "Please choose perform, help out, or both." };
+  if (!services || services.length > 500) return { error: "Please list the services offered (500 characters or fewer)." };
+  if (needs.length > 500) return { error: "Please keep the needs to 500 characters or fewer." };
+  return { name, about, email, role, services, needs };
+}
+
+function handleArtistSignup(req, res) {
+  readJsonBody(req, 16 * 1024, (err, body) => {
+    if (err) {
+      sendJson(res, 400, { error: err.message });
+      return;
+    }
+    const result = validateArtist(body);
+    if (result.error) {
+      sendJson(res, 400, { error: result.error });
+      return;
+    }
+    const { name, about, email, role, services, needs } = result;
+    stmt.insertArtist.run(name, about, email, role, services, needs, new Date().toISOString());
+    sendJson(res, 201, { status: "ok" });
+    sendArtistThankYou({ name, email, role, services, needs });
+  });
+}
+
+// Sends the seed artist's thank-you email once to SEED_REVIEW_EMAIL (not to the artist) for review.
+// It is only marked as sent after it succeeds, so a failure is retried on the next server start.
+function sendSeedReviewEmail() {
+  if (db.prepare("SELECT 1 FROM meta WHERE key = 'seed_review_email_sent'").get()) return;
+  if (!mailIsConfigured()) {
+    console.log("Seed review email not sent yet: SMTP_USER and SMTP_PASS are not set. It will be tried on the next start.");
+    return;
+  }
+  const a = SEED_ARTIST;
+  const message = buildArtistThankYouEmail({ name: a.name, role: a.role, services: a.services, needs: a.needs });
+  sendMail({
+    to: SEED_REVIEW_EMAIL,
+    subject: `[Review copy] ${message.subject}`,
+    text: message.text,
+    html: message.html,
+    images: message.images,
+  })
+    .then(() => {
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('seed_review_email_sent', ?)").run(new Date().toISOString());
+      console.log(`Seed review email sent to ${SEED_REVIEW_EMAIL}`);
+    })
+    .catch((err) => console.error(`Seed review email to ${SEED_REVIEW_EMAIL} failed: ${err.message}`));
+}
+
+// Sends the "you're approved" email the first time an artist is approved. It is only recorded as sent
+// after it succeeds, so if it fails, approving the artist again (hide, then approve) retries it.
+function sendArtistApproval(artist) {
+  const message = buildArtistApprovalEmail({ name: artist.name, role: artist.role, siteUrl: SITE_URL });
+  sendMail({ to: artist.email, subject: message.subject, text: message.text, html: message.html, images: message.images })
+    .then(() => {
+      stmt.setApprovalEmailed.run(new Date().toISOString(), artist.id);
+      dumpToJson();
+      console.log(`Artist approval email sent to ${artist.email}`);
+    })
+    .catch((err) => console.error(`Artist approval email to ${artist.email} failed: ${err.message}`));
+}
+
+// Emails a linked artist about their performance: kind is "added", "removed" or "time-changed"
+// (previousTime is only used for "time-changed"). Returns what happened, for the admin page:
+// "sending", "not-linked" (no artist record) or "not-configured" (no SMTP login).
+function sendLineupEmail(artistId, performance, kind, previousTime = "") {
+  const artist = artistId ? stmt.getArtist.get(artistId) : null;
+  if (!artist) return "not-linked";
+  if (!mailIsConfigured()) return "not-configured";
+  const message =
+    kind === "time-changed"
+      ? buildTimeChangeEmail({ name: artist.name, performance, previousTime, siteUrl: SITE_URL })
+      : buildLineupEmail({ name: artist.name, added: kind === "added", performance, siteUrl: SITE_URL });
+  const what = kind === "time-changed" ? "time-changed" : kind === "added" ? "added-to-lineup" : "removed-from-lineup";
+  sendMail({ to: artist.email, subject: message.subject, text: message.text, html: message.html, images: message.images })
+    .then(() => console.log(`Lineup email (${what}) sent to ${artist.email}`))
+    .catch((err) => console.error(`Lineup email (${what}) to ${artist.email} failed: ${err.message}`));
+  return "sending";
+}
+
 // ---------- Admin API and login ----------
 
 function safeEqual(a, b) {
@@ -340,6 +575,24 @@ function validateNeed(body) {
   if (!name || name.length > 100) return { error: "Please enter a need name (100 characters or fewer)." };
   if (description.length > 500) return { error: "Please keep the description to 500 characters or fewer." };
   return { name, description };
+}
+
+function validatePerformance(body) {
+  const artist = textField(body, "artist");
+  const title = textField(body, "title");
+  const time = textField(body, "time");
+  const description = textField(body, "description");
+  if (!artist || artist.length > 100) return { error: "Please enter the performer (100 characters or fewer)." };
+  if (title.length > 150) return { error: "Please keep the title to 150 characters or fewer." };
+  if (time.length > 100) return { error: "Please keep the time to 100 characters or fewer." };
+  if (description.length > 1500) return { error: "Please keep the description to 1500 characters or fewer." };
+  // Optional link to an artist record ("" or missing means not linked).
+  let artistId = null;
+  if (body.artistId !== undefined && body.artistId !== null && body.artistId !== "") {
+    artistId = Number(body.artistId);
+    if (!Number.isInteger(artistId) || !stmt.getArtist.get(artistId)) return { error: "That artist no longer exists." };
+  }
+  return { artist, title, time, description, artistId };
 }
 
 function withBody(req, res, handler) {
@@ -403,6 +656,129 @@ function handleAdminApi(req, res, pathname) {
     return;
   }
 
+  const artistMatch = pathname.match(/^\/api\/admin\/artists(?:\/(\d+))?$/);
+  const approvalMatch = pathname.match(/^\/api\/admin\/artists\/(\d+)\/approval$/);
+  const performanceMatch = pathname.match(/^\/api\/admin\/performances(?:\/(\d+))?$/);
+  const visibilityMatch = pathname.match(/^\/api\/admin\/performances\/(\d+)\/visibility$/);
+
+  if (performanceMatch && !performanceMatch[1] && req.method === "GET") {
+    sendJson(res, 200, stmt.listAllPerformances.all().map((p) => ({ ...p, visible: Boolean(p.visible) })));
+    return;
+  }
+
+  if (visibilityMatch && req.method === "PUT") {
+    withBody(req, res, (body) => {
+      const changed = stmt.setPerformanceVisible.run(body.visible ? 1 : 0, Number(visibilityMatch[1])).changes;
+      if (!changed) return sendJson(res, 404, { error: "That performance no longer exists." });
+      sendJson(res, 200, { status: "ok" });
+    });
+    return;
+  }
+
+  if (artistMatch && !artistMatch[1] && req.method === "GET") {
+    sendJson(res, 200, stmt.listAllArtists.all().map((a) => ({ ...a, approved: Boolean(a.approved) })));
+    return;
+  }
+
+  if (artistMatch && artistMatch[1] && req.method === "PUT") {
+    withBody(req, res, (body) => {
+      const r = validateArtist(body);
+      if (r.error) return sendJson(res, 400, { error: r.error });
+      const changed = stmt.updateArtist.run(r.name, r.about, r.email, r.role, r.services, r.needs, Number(artistMatch[1])).changes;
+      if (!changed) return sendJson(res, 404, { error: "That artist no longer exists." });
+      sendJson(res, 200, { status: "ok" });
+    });
+    return;
+  }
+
+  if (approvalMatch && req.method === "PUT") {
+    withBody(req, res, (body) => {
+      const artist = stmt.getArtist.get(Number(approvalMatch[1]));
+      if (!artist) return sendJson(res, 404, { error: "That artist no longer exists." });
+      stmt.setArtistApproved.run(body.approved ? 1 : 0, artist.id);
+      // email: "sending" (first approval), "already-sent", "not-configured", or "none" (when hiding).
+      let email = "none";
+      if (body.approved) {
+        if (artist.approval_emailed_at) email = "already-sent";
+        else if (!mailIsConfigured()) email = "not-configured";
+        else {
+          email = "sending";
+          sendArtistApproval(artist);
+        }
+      }
+      sendJson(res, 200, { status: "ok", email, to: artist.email });
+    });
+    return;
+  }
+
+  if (artistMatch && artistMatch[1] && req.method === "DELETE") {
+    const changed = stmt.deleteArtist.run(Number(artistMatch[1])).changes;
+    if (!changed) return sendJson(res, 404, { error: "That artist no longer exists." });
+    sendJson(res, 200, { status: "ok" });
+    return;
+  }
+
+  if (performanceMatch && !performanceMatch[1] && req.method === "POST") {
+    withBody(req, res, (body) => {
+      const result = validatePerformance(body);
+      if (result.error) return sendJson(res, 400, { error: result.error });
+      const { pos } = stmt.nextPerformancePosition.get();
+      stmt.insertPerformance.run(result.artist, result.title, result.time, result.description, pos, result.artistId);
+      const email = sendLineupEmail(result.artistId, result, "added");
+      sendJson(res, 201, { status: "ok", email });
+    });
+    return;
+  }
+
+  if (performanceMatch && performanceMatch[1] && req.method === "PUT") {
+    withBody(req, res, (body) => {
+      const result = validatePerformance(body);
+      if (result.error) return sendJson(res, 400, { error: result.error });
+      const before = stmt.getPerformance.get(Number(performanceMatch[1]));
+      if (!before) return sendJson(res, 404, { error: "That performance no longer exists." });
+      stmt.updatePerformance.run(result.artist, result.title, result.time, result.description, result.artistId, before.id);
+      // Linking the performance to a different artist counts as removing one and adding the other
+      // (the "added" email already shows the new time). With the same artist, a new time gets its own notice.
+      const emails = {};
+      if ((before.artist_id ?? null) !== result.artistId) {
+        if (before.artist_id) emails.removed = sendLineupEmail(before.artist_id, before, "removed");
+        if (result.artistId) emails.added = sendLineupEmail(result.artistId, result, "added");
+      } else if (result.artistId && before.time !== result.time) {
+        emails.timeChanged = sendLineupEmail(result.artistId, result, "time-changed", before.time);
+      }
+      sendJson(res, 200, { status: "ok", emails });
+    });
+    return;
+  }
+
+  if (performanceMatch && performanceMatch[1] && req.method === "DELETE") {
+    const performance = stmt.getPerformance.get(Number(performanceMatch[1]));
+    if (!performance) return sendJson(res, 404, { error: "That performance no longer exists." });
+    stmt.deletePerformance.run(performance.id);
+    const email = sendLineupEmail(performance.artist_id, performance, "removed");
+    sendJson(res, 200, { status: "ok", email });
+    return;
+  }
+
+  if (signupMatch && req.method === "PUT") {
+    withBody(req, res, (body) => {
+      const name = textField(body, "name");
+      const email = textField(body, "email");
+      const phone = textField(body, "phone");
+      const details = textField(body, "details");
+      const needId = textField(body, "needId");
+      if (!name || name.length > 100) return sendJson(res, 400, { error: "Please enter a name (100 characters or fewer)." });
+      if (!EMAIL_PATTERN.test(email) || email.length > 200) return sendJson(res, 400, { error: "Please enter a valid email address." });
+      if (phone.length > 30) return sendJson(res, 400, { error: "Phone number is too long." });
+      if (details.length > 500) return sendJson(res, 400, { error: "Please keep the note to 500 characters or fewer." });
+      if (!stmt.needExists.get(needId)) return sendJson(res, 400, { error: "Please choose a volunteer need." });
+      const changed = stmt.updateSignup.run(needId, name, email, phone, details, Number(signupMatch[1])).changes;
+      if (!changed) return sendJson(res, 404, { error: "That volunteer no longer exists." });
+      sendJson(res, 200, { status: "ok" });
+    });
+    return;
+  }
+
   if (signupMatch && req.method === "DELETE") {
     const changed = stmt.deleteSignup.run(Number(signupMatch[1])).changes;
     if (!changed) return sendJson(res, 404, { error: "That volunteer no longer exists." });
@@ -422,6 +798,11 @@ function handleApi(req, res, pathname) {
   }
   if (pathname === "/api/needs") {
     sendJson(res, 200, groupedNeeds(false));
+    return;
+  }
+  // Performance lineup plus approved artists. Email and needs stay private to the admin page.
+  if (pathname === "/api/artists") {
+    sendJson(res, 200, { performances: stmt.listVisiblePerformances.all(), artists: stmt.listApprovedArtists.all() });
     return;
   }
   sendJson(res, 404, { error: "Unknown API route" });
@@ -480,8 +861,11 @@ function handleDeploy(req, res) {
 const server = http.createServer((req, res) => {
   const { pathname } = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
-  // Save a fresh JSON copy after every successful change to volunteer needs or sign-ups.
-  if (req.method !== "GET" && (pathname === "/api/volunteer" || pathname.startsWith("/api/admin/"))) {
+  // Save a fresh JSON copy after every successful change to needs, sign-ups, artists or performances.
+  if (
+    req.method !== "GET" &&
+    (pathname === "/api/volunteer" || pathname === "/api/artists" || pathname.startsWith("/api/admin/"))
+  ) {
     res.on("finish", () => {
       if (res.statusCode < 300) dumpToJson();
     });
@@ -503,6 +887,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && pathname === "/api/volunteer") {
     handleVolunteer(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/artists") {
+    handleArtistSignup(req, res);
     return;
   }
 
@@ -529,6 +918,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
+  sendSeedReviewEmail();
   // deploy.sh reads this to know which process to stop on restart.
   fs.writeFileSync(PID_FILE, String(process.pid));
   console.log(`Worship On The Mountain Node server listening on http://localhost:${PORT}`);

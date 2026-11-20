@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Login - Worship On The Mountain</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Lora:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+  <header class="topbar">
+    <nav>
+      <a href="/index.html">Home</a>
+      <a href="/register.html">Volunteer</a>
+      <a href="/artists.html">Artists</a>
+      <a href="/donate.html">Donate</a>
+      <a href="/about.html">About</a>
+      <a href="/admin.html" aria-current="page">Admin</a>
+      <a class="fb-link" href="https://www.facebook.com/share/g/1m96j6o7TW/" target="_blank" rel="noopener" aria-label="Facebook"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg></a>
+    </nav>
+  </header>
+  <main class="admin">
+    <h1>Admin</h1>
+    <section aria-labelledby="login-heading">
+      <h2 id="login-heading">Log in</h2>
+      <form id="login-form">
+        <label>Password
+          <input name="password" type="password" required autocomplete="current-password" autofocus>
+        </label>
+        <button type="submit">Log in</button>
+      </form>
+      <p id="message" role="status"></p>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById("login-form");
+    const message = document.getElementById("message");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button");
+      button.disabled = true;
+      message.textContent = "Checking...";
+      try {
+        const response = await fetch("/api/admin-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: form.password.value }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Login failed.");
+        window.location.href = "/admin.html";
+      } catch (err) {
+        message.textContent = err.message;
+        form.password.select();
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

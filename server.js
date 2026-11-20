@@ -5,6 +5,13 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
+// Load settings such as ADMIN_PASSWORD from .env (kept out of git). Variables that are
+// already set in the environment are not overwritten.
+try {
+  process.loadEnvFile(path.join(__dirname, ".env"));
+} catch (err) {
+  if (err.code !== "ENOENT") console.error("Could not read .env: " + err.message);
+}
 const { sendMail, mailIsConfigured } = require("./mailer");
 const {
   buildThankYouEmail,
@@ -326,14 +333,14 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function serveFile(req, res, filePath) {
+function serveFile(req, res, filePath, status = 200) {
   fs.stat(filePath, (statErr, stats) => {
     if (statErr || !stats.isFile()) {
       sendJson(res, 404, { error: "Not found" });
       return;
     }
     const type = MIME_TYPES[path.extname(filePath)] || "application/octet-stream";
-    res.writeHead(200, { "Content-Type": type, "Content-Length": stats.size });
+    res.writeHead(status, { "Content-Type": type, "Content-Length": stats.size });
     if (req.method === "HEAD") {
       res.end();
       return;
@@ -545,28 +552,79 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-// HTTP Basic login. The browser remembers it for the admin page and its API calls.
-function checkAdmin(req, res) {
+// Admin login. The login form (admin-login.html) posts the password to /api/admin-login,
+// which sets a session cookie. The cookie value is derived from the password, so changing
+// ADMIN_PASSWORD logs everyone out. HTTP Basic login is still accepted for scripts.
+const ADMIN_COOKIE = "admin_session";
+const ADMIN_SESSION_DAYS = 30;
+
+function adminSessionToken() {
+  return crypto.createHmac("sha256", ADMIN_PASSWORD).update("admin-session-v1").digest("hex");
+}
+
+function readCookie(req, name) {
+  for (const part of (req.headers.cookie || "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq >= 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return "";
+}
+
+function adminCookie(req, value, maxAgeSeconds) {
+  const secure = req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+  return `${ADMIN_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
+function isAdmin(req) {
+  if (safeEqual(readCookie(req, ADMIN_COOKIE), adminSessionToken())) return true;
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Basic ")) {
+    const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+    const colon = decoded.indexOf(":");
+    return colon >= 0 && safeEqual(decoded.slice(colon + 1), ADMIN_PASSWORD);
+  }
+  return false;
+}
+
+function checkAdmin(req, res, pathname) {
   if (!ADMIN_PASSWORD) {
     sendJson(res, 503, { error: "Admin is not configured (ADMIN_PASSWORD is not set)" });
     return false;
   }
-  const header = req.headers.authorization || "";
-  let ok = false;
-  if (header.startsWith("Basic ")) {
-    const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-    const colon = decoded.indexOf(":");
-    ok = colon >= 0 && safeEqual(decoded.slice(colon + 1), ADMIN_PASSWORD);
+  if (isAdmin(req)) return true;
+  if (pathname === "/admin.html") {
+    // Show the login form in place of the admin page.
+    serveFile(req, res, path.join(PUBLIC_DIR, "admin-login.html"), 401);
+  } else {
+    sendJson(res, 401, { error: "Login required" });
   }
-  if (!ok) {
-    res.writeHead(401, {
-      "Content-Type": MIME_TYPES[".json"],
-      "WWW-Authenticate": 'Basic realm="Worship On The Mountain admin", charset="UTF-8"',
-    });
-    res.end(JSON.stringify({ error: "Login required" }));
-    return false;
-  }
-  return true;
+  return false;
+}
+
+function handleAdminLogin(req, res) {
+  readJsonBody(req, 4 * 1024, (err, body) => {
+    if (err) {
+      sendJson(res, 400, { error: "Invalid request" });
+      return;
+    }
+    if (!ADMIN_PASSWORD) {
+      sendJson(res, 503, { error: "Admin is not configured (ADMIN_PASSWORD is not set)" });
+      return;
+    }
+    const password = body && typeof body.password === "string" ? body.password : "";
+    if (!safeEqual(password, ADMIN_PASSWORD)) {
+      // Slow down password guessing.
+      setTimeout(() => sendJson(res, 401, { error: "Wrong password" }), 1000);
+      return;
+    }
+    res.setHeader("Set-Cookie", adminCookie(req, adminSessionToken(), ADMIN_SESSION_DAYS * 24 * 60 * 60));
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+function handleAdminLogout(req, res) {
+  res.setHeader("Set-Cookie", adminCookie(req, "", 0));
+  sendJson(res, 200, { ok: true });
 }
 
 function validateNeed(body) {
@@ -871,9 +929,19 @@ const server = http.createServer((req, res) => {
     });
   }
 
+  if (req.method === "POST" && pathname === "/api/admin-login") {
+    handleAdminLogin(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/admin-logout") {
+    handleAdminLogout(req, res);
+    return;
+  }
+
   // Admin pages and API require the admin login before anything else.
   if (pathname === "/admin.html" || pathname.startsWith("/api/admin/")) {
-    if (!checkAdmin(req, res)) return;
+    if (!checkAdmin(req, res, pathname)) return;
     if (pathname.startsWith("/api/admin/")) {
       handleAdminApi(req, res, pathname);
       return;

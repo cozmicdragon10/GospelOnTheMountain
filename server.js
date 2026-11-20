@@ -904,11 +904,18 @@ function handleDeploy(req, res) {
       sendJson(res, 200, { status: "ignored", event, ref });
       return;
     }
-    const child = spawn("bash", [path.join(__dirname, "deploy.sh")], {
+    // Windows uses deploy.ps1 (bash is usually not on the PATH there); elsewhere deploy.sh.
+    const [command, args] =
+      process.platform === "win32"
+        ? ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "deploy.ps1")]]
+        : ["bash", [path.join(__dirname, "deploy.sh")]];
+    const child = spawn(command, args, {
       cwd: __dirname,
       detached: true,
       stdio: "ignore",
+      windowsHide: true,
     });
+    child.on("error", (err) => console.error("Could not start deploy: " + err.message));
     child.unref();
     sendJson(res, 202, { status: "deploying" });
   });

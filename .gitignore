@@ -4,6 +4,7 @@
 # Deploy runtime files
 server.pid
 deploy.log
+server.log
 .env
 
 # Database and its journal files (private runtime data)

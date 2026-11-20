@@ -5,6 +5,13 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
+// Load settings such as ADMIN_PASSWORD from .env (kept out of git). Variables that are
+// already set in the environment are not overwritten.
+try {
+  process.loadEnvFile(path.join(__dirname, ".env"));
+} catch (err) {
+  if (err.code !== "ENOENT") console.error("Could not read .env: " + err.message);
+}
 const { sendMail, mailIsConfigured } = require("./mailer");
 const {
   buildThankYouEmail,

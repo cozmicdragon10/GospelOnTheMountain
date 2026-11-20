@@ -21,7 +21,13 @@ Every push to `main` on GitHub is pulled onto the server and the web server is r
 
 To deploy by hand, run `./deploy.sh`.
 
+### Windows
+
+On Windows the webhook runs `deploy.ps1` instead of `deploy.sh`. The live copy is `C:\websites\GospelOnTheMountian`. It is kept running by the "GospelOnTheMountain Site" scheduled task (`C:\websites\run-gospel-site.ps1`), which restarts the server after a deploy stops it. Put `DEPLOY_SECRET=...` in that folder's `.env`. To deploy by hand, run:
+
+    powershell -ExecutionPolicy Bypass -File C:\websites\GospelOnTheMountian\deploy.ps1
+
 Notes:
 - `deploy.sh` runs `git reset --hard origin/main`, so any uncommitted edits on the server are discarded.
 - The server must be able to run `git fetch` against GitHub, so the repo's credentials must be set up on the device.
-- Runtime files (`server.pid`, `deploy.log`, `.env`) are git-ignored.
+- Runtime files (`server.pid`, `deploy.log`, `server.log`, `.env`) are git-ignored.

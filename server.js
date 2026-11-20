@@ -904,11 +904,24 @@ function handleDeploy(req, res) {
       sendJson(res, 200, { status: "ignored", event, ref });
       return;
     }
-    const child = spawn("bash", [path.join(__dirname, "deploy.sh")], {
+    // Windows uses deploy.ps1 (bash is usually not on the PATH there); elsewhere deploy.sh.
+    // PowerShell exits at once when started as a detached process (it has no console), so on
+    // Windows cmd's "start" gives it its own hidden window that outlives this server.
+    const [command, args] =
+      process.platform === "win32"
+        ? [
+            "cmd.exe",
+            ["/d", "/c", "start", '""', "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+              "-WindowStyle", "Hidden", "-File", path.join(__dirname, "deploy.ps1")],
+          ]
+        : ["bash", [path.join(__dirname, "deploy.sh")]];
+    const child = spawn(command, args, {
       cwd: __dirname,
       detached: true,
       stdio: "ignore",
+      windowsHide: true,
     });
+    child.on("error", (err) => console.error("Could not start deploy: " + err.message));
     child.unref();
     sendJson(res, 202, { status: "deploying" });
   });

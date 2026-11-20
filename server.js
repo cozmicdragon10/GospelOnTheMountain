@@ -905,9 +905,15 @@ function handleDeploy(req, res) {
       return;
     }
     // Windows uses deploy.ps1 (bash is usually not on the PATH there); elsewhere deploy.sh.
+    // PowerShell exits at once when started as a detached process (it has no console), so on
+    // Windows cmd's "start" gives it its own hidden window that outlives this server.
     const [command, args] =
       process.platform === "win32"
-        ? ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "deploy.ps1")]]
+        ? [
+            "cmd.exe",
+            ["/d", "/c", "start", '""', "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+              "-WindowStyle", "Hidden", "-File", path.join(__dirname, "deploy.ps1")],
+          ]
         : ["bash", [path.join(__dirname, "deploy.sh")]];
     const child = spawn(command, args, {
       cwd: __dirname,

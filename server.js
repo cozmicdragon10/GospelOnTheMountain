@@ -917,7 +917,14 @@ function handleDeploy(req, res) {
 // ---------- Router ----------
 
 const server = http.createServer((req, res) => {
-  const { pathname } = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  // A malformed address (for example "//" or a bad Host header) must not crash the server.
+  let pathname;
+  try {
+    ({ pathname } = new URL(req.url, "http://localhost"));
+  } catch (_) {
+    sendJson(res, 400, { error: "Bad request" });
+    return;
+  }
 
   // Save a fresh JSON copy after every successful change to needs, sign-ups, artists or performances.
   if (
@@ -975,7 +982,13 @@ const server = http.createServer((req, res) => {
   }
 
   // Resolve the requested path inside PUBLIC_DIR and reject anything that escapes it.
-  const requested = pathname === "/" ? "/index.html" : decodeURIComponent(pathname);
+  let requested;
+  try {
+    requested = pathname === "/" ? "/index.html" : decodeURIComponent(pathname);
+  } catch (_) {
+    sendJson(res, 400, { error: "Bad request" });
+    return;
+  }
   const filePath = path.join(PUBLIC_DIR, path.normalize(requested));
   if (!filePath.startsWith(PUBLIC_DIR + path.sep)) {
     sendJson(res, 403, { error: "Forbidden" });

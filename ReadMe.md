@@ -6,6 +6,17 @@ Worship On The Mountain
 
 Set `PORT` to change the port (default 3000).
 
+## Email
+
+The site sends email through Gmail SMTP. Put these in `.env` in the project folder (git-ignored), then start the server:
+
+    SMTP_USER=<gmail address>
+    SMTP_PASS="<gmail app password>"
+
+Optional: `SMTP_HOST` (default smtp.gmail.com), `SMTP_PORT` (default 465), `MAIL_FROM`, `MAIL_FROM_NAME`.
+
+Run `npm ci --omit=dev` (or the deploy scripts, which do it for you) so the `nodemailer` package is installed.
+
 ## Deploy from GitHub
 
 Every push to `main` on GitHub is pulled onto the server and the web server is restarted.

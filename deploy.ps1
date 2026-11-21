@@ -33,6 +33,12 @@ if ((Invoke-Git 'fetch origin main') -ne 0) { Write-Log 'git fetch failed'; exit
 # GitHub is the source of truth: match it exactly.
 if ((Invoke-Git 'reset --hard origin/main') -ne 0) { Write-Log 'git reset failed'; exit 1 }
 
+# Install dependencies (node_modules is not in git). Done before stopping the old server,
+# so a failed install leaves the current server running.
+$npmOut = cmd /c "npm ci --omit=dev --no-audit --no-fund 2>&1"
+foreach ($line in $npmOut) { Write-Log "  $line" }
+if ($LASTEXITCODE -ne 0) { Write-Log 'npm ci failed'; exit 1 }
+
 # Stop the running server, if any.
 if (Test-Path $PidFile) {
   $oldPid = (Get-Content $PidFile -Raw).Trim()

@@ -17,6 +17,12 @@ if ! git reset --hard origin/main; then
   echo "git reset failed"; exit 1
 fi
 
+# Install dependencies (node_modules is not in git). Done before stopping the old server,
+# so a failed install leaves the current server running.
+if ! npm ci --omit=dev --no-audit --no-fund; then
+  echo "npm ci failed"; exit 1
+fi
+
 # Stop the running server, if any.
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE")"

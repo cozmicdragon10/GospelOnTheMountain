@@ -28,8 +28,8 @@ function buildThankYouEmail({ name, needName, needDescription, details }) {
     "The exact date is still to be determined. We will be in touch with more details as they are confirmed.",
     "",
     "If you have any questions or need more information, please contact Samuel Wright Jr.:",
-    "Email: outlawlife21@icloud.com",
-    "Phone: 931-261-8205",
+    "Email: worshiponthemountain@outlook.com",
+    "Phone: 931-655-9090",
     "",
     "He said He can and will move mountains for each one of us. Thank you for helping us shake one for Him!",
     "",
@@ -54,8 +54,8 @@ function buildThankYouEmail({ name, needName, needDescription, details }) {
       <p><strong>Date:</strong> Exact date to be determined. We will be in touch with more details as they are confirmed.</p>
       <img src="cid:evt2" alt="Worship On The Mountain event poster" style="display:block;max-width:100%;height:auto;margin:20px auto;border:6px solid #ffffff;outline:1px solid #c9a227;">
       <p>If you have any questions or need more information, please contact <strong>Samuel Wright Jr.</strong>:</p>
-      <p style="margin:0 0 4px;">Email: <a href="mailto:outlawlife21@icloud.com" style="color:#2c4170;">outlawlife21@icloud.com</a></p>
-      <p style="margin:0 0 16px;">Phone: <a href="tel:9312618205" style="color:#2c4170;">931-261-8205</a></p>
+      <p style="margin:0 0 4px;">Email: <a href="mailto:worshiponthemountain@outlook.com" style="color:#2c4170;">worshiponthemountain@outlook.com</a></p>
+      <p style="margin:0 0 16px;">Phone: <a href="tel:9316559090" style="color:#2c4170;">931-655-9090</a></p>
       <p style="font-style:italic;color:#1b2a4a;">He said He can and will move mountains for each one of us. Thank you for helping us shake one for Him!</p>
       <p style="margin-bottom:0;">With gratitude,<br><strong>Worship On The Mountain</strong></p>
     </div>
@@ -73,6 +73,53 @@ function buildThankYouEmail({ name, needName, needDescription, details }) {
   }
 
   return { subject, text, html, images };
+}
+
+// Thanks a donor for a gift. Not a tax receipt; the amount and date are shown as recorded.
+function buildDonationThankYouEmail({ name, amountCents, donatedOn }) {
+  const amount = "$" + (amountCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const subject = "Thank you for your donation to Worship On The Mountain";
+  const dateText = donatedOn ? ` on ${donatedOn}` : "";
+  const proceeds =
+    "All proceeds will fund the event. Any remaining funds will go to help mental health in Tennessee.";
+
+  const text = [
+    name ? `Dear ${name},` : "Dear friend,",
+    "",
+    `Thank you for your generous gift of ${amount} to Worship On The Mountain${dateText}.`,
+    "",
+    proceeds,
+    "",
+    "If you have any questions, please contact Samuel Wright Jr.:",
+    "Email: worshiponthemountain@outlook.com",
+    "Phone: 931-655-9090",
+    "",
+    "He said He can and will move mountains for each one of us. Thank you for helping us shake one for Him!",
+    "",
+    "With gratitude,",
+    "Worship On The Mountain",
+  ].join("\n");
+
+  const html = `<!doctype html>
+<html>
+  <body style="margin:0;padding:24px;background:#fbf7ee;font-family:Georgia,'Times New Roman',serif;color:#2a2a2a;">
+    <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #c9a227;border-top:6px solid #c9a227;padding:24px;">
+      <h1 style="margin:0 0 16px;color:#1b2a4a;font-size:26px;text-align:center;">Thank you for your gift!</h1>
+      <p>${name ? `Dear ${escapeHtml(name)},` : "Dear friend,"}</p>
+      <p>Thank you for your generous gift of <strong>${escapeHtml(amount)}</strong> to <strong>Worship On The Mountain</strong>${escapeHtml(dateText)}.</p>
+      <div style="border-left:4px solid #c9a227;background:#fbf7ee;padding:12px 16px;margin:16px 0;">
+        <p style="margin:0;">${escapeHtml(proceeds)}</p>
+      </div>
+      <p>If you have any questions, please contact <strong>Samuel Wright Jr.</strong>:</p>
+      <p style="margin:0 0 4px;">Email: <a href="mailto:worshiponthemountain@outlook.com" style="color:#2c4170;">worshiponthemountain@outlook.com</a></p>
+      <p style="margin:0 0 16px;">Phone: <a href="tel:9316559090" style="color:#2c4170;">931-655-9090</a></p>
+      <p style="font-style:italic;color:#1b2a4a;">He said He can and will move mountains for each one of us. Thank you for helping us shake one for Him!</p>
+      <p style="margin-bottom:0;">With gratitude,<br><strong>Worship On The Mountain</strong></p>
+    </div>
+  </body>
+</html>`;
+
+  return { subject, text, html, images: [] };
 }
 
 const ARTIST_ROLE_TEXT = {
@@ -108,8 +155,8 @@ function buildArtistThankYouEmail({ name, role, services, needs }) {
     "The exact date is still to be determined. We will be in touch with more details as they are confirmed.",
     "",
     "If you have any questions or need more information, please contact Samuel Wright Jr.:",
-    "Email: outlawlife21@icloud.com",
-    "Phone: 931-261-8205",
+    "Email: worshiponthemountain@outlook.com",
+    "Phone: 931-655-9090",
     "",
     '"Sing unto him a new song; play skilfully with a loud noise." (Psalm 33:3)',
     "",
@@ -145,8 +192,8 @@ function buildArtistThankYouEmail({ name, role, services, needs }) {
       <p style="text-align:center;font-style:italic;color:#1b2a4a;margin:0 0 4px;">&ldquo;Sing unto him a new song; play skilfully with a loud noise.&rdquo;</p>
       <p style="text-align:center;color:#8a6d0f;margin:0 0 20px;">Psalm 33:3</p>
       <p>If you have any questions or need more information, please contact <strong>Samuel Wright Jr.</strong>:</p>
-      <p style="margin:0 0 4px;">Email: <a href="mailto:outlawlife21@icloud.com" style="color:#2c4170;">outlawlife21@icloud.com</a></p>
-      <p style="margin:0 0 16px;">Phone: <a href="tel:9312618205" style="color:#2c4170;">931-261-8205</a></p>
+      <p style="margin:0 0 4px;">Email: <a href="mailto:worshiponthemountain@outlook.com" style="color:#2c4170;">worshiponthemountain@outlook.com</a></p>
+      <p style="margin:0 0 16px;">Phone: <a href="tel:9316559090" style="color:#2c4170;">931-655-9090</a></p>
       <p style="font-style:italic;color:#1b2a4a;">He said He can and will move mountains for each one of us. Thank you for helping us shake one for Him!</p>
       <p style="margin-bottom:0;">With gratitude and blessings,<br><strong>Worship On The Mountain</strong></p>
     </div>
@@ -188,8 +235,8 @@ function buildArtistApprovalEmail({ name, role, siteUrl }) {
     "The exact date is still to be determined. We will be in touch with more details as they are confirmed.",
     "",
     "If you have any questions or need more information, please contact Samuel Wright Jr.:",
-    "Email: outlawlife21@icloud.com",
-    "Phone: 931-261-8205",
+    "Email: worshiponthemountain@outlook.com",
+    "Phone: 931-655-9090",
     "",
     '"Let everything that hath breath praise the LORD. Praise ye the LORD." (Psalm 150:6)',
     "",
@@ -225,8 +272,8 @@ function buildArtistApprovalEmail({ name, role, siteUrl }) {
       <p style="text-align:center;font-style:italic;color:#1b2a4a;margin:0 0 4px;">&ldquo;Let everything that hath breath praise the LORD. Praise ye the LORD.&rdquo;</p>
       <p style="text-align:center;color:#8a6d0f;margin:0 0 20px;">Psalm 150:6</p>
       <p>If you have any questions or need more information, please contact <strong>Samuel Wright Jr.</strong>:</p>
-      <p style="margin:0 0 4px;">Email: <a href="mailto:outlawlife21@icloud.com" style="color:#2c4170;">outlawlife21@icloud.com</a></p>
-      <p style="margin:0 0 16px;">Phone: <a href="tel:9312618205" style="color:#2c4170;">931-261-8205</a></p>
+      <p style="margin:0 0 4px;">Email: <a href="mailto:worshiponthemountain@outlook.com" style="color:#2c4170;">worshiponthemountain@outlook.com</a></p>
+      <p style="margin:0 0 16px;">Phone: <a href="tel:9316559090" style="color:#2c4170;">931-655-9090</a></p>
       <p style="font-style:italic;color:#1b2a4a;">He said He can and will move mountains for each one of us. Thank you for helping us shake one for Him!</p>
       <p style="margin-bottom:0;">With gratitude and blessings,<br><strong>Worship On The Mountain</strong></p>
     </div>
@@ -294,8 +341,8 @@ function buildLineupEmail({ name, added, performance, siteUrl }) {
     "The exact date of the event is still to be determined. We will be in touch with more details as they are confirmed.",
     "",
     "If you have any questions or need more information, please contact Samuel Wright Jr.:",
-    "Email: outlawlife21@icloud.com",
-    "Phone: 931-261-8205",
+    "Email: worshiponthemountain@outlook.com",
+    "Phone: 931-655-9090",
     "",
     `"${verse.text}" (${verse.ref})`,
     "",
@@ -337,8 +384,8 @@ function buildLineupEmail({ name, added, performance, siteUrl }) {
       <p style="text-align:center;font-style:italic;color:#1b2a4a;margin:0 0 4px;">&ldquo;${verse.text}&rdquo;</p>
       <p style="text-align:center;color:#8a6d0f;margin:0 0 20px;">${verse.ref}</p>
       <p>If you have any questions or need more information, please contact <strong>Samuel Wright Jr.</strong>:</p>
-      <p style="margin:0 0 4px;">Email: <a href="mailto:outlawlife21@icloud.com" style="color:#2c4170;">outlawlife21@icloud.com</a></p>
-      <p style="margin:0 0 16px;">Phone: <a href="tel:9312618205" style="color:#2c4170;">931-261-8205</a></p>
+      <p style="margin:0 0 4px;">Email: <a href="mailto:worshiponthemountain@outlook.com" style="color:#2c4170;">worshiponthemountain@outlook.com</a></p>
+      <p style="margin:0 0 16px;">Phone: <a href="tel:9316559090" style="color:#2c4170;">931-655-9090</a></p>
       <p style="margin-bottom:0;">With gratitude and blessings,<br><strong>Worship On The Mountain</strong></p>
     </div>
   </body>
@@ -392,8 +439,8 @@ function buildTimeChangeEmail({ name, performance, previousTime, siteUrl }) {
     "The exact date of the event is still to be determined. We will be in touch with more details as they are confirmed.",
     "",
     "If you have any questions or need more information, please contact Samuel Wright Jr.:",
-    "Email: outlawlife21@icloud.com",
-    "Phone: 931-261-8205",
+    "Email: worshiponthemountain@outlook.com",
+    "Phone: 931-655-9090",
     "",
     '"To every thing there is a season, and a time to every purpose under the heaven." (Ecclesiastes 3:1)',
     "",
@@ -433,8 +480,8 @@ function buildTimeChangeEmail({ name, performance, previousTime, siteUrl }) {
       <p style="text-align:center;font-style:italic;color:#1b2a4a;margin:20px 0 4px;">&ldquo;To every thing there is a season, and a time to every purpose under the heaven.&rdquo;</p>
       <p style="text-align:center;color:#8a6d0f;margin:0 0 20px;">Ecclesiastes 3:1</p>
       <p>If you have any questions or need more information, please contact <strong>Samuel Wright Jr.</strong>:</p>
-      <p style="margin:0 0 4px;">Email: <a href="mailto:outlawlife21@icloud.com" style="color:#2c4170;">outlawlife21@icloud.com</a></p>
-      <p style="margin:0 0 16px;">Phone: <a href="tel:9312618205" style="color:#2c4170;">931-261-8205</a></p>
+      <p style="margin:0 0 4px;">Email: <a href="mailto:worshiponthemountain@outlook.com" style="color:#2c4170;">worshiponthemountain@outlook.com</a></p>
+      <p style="margin:0 0 16px;">Phone: <a href="tel:9316559090" style="color:#2c4170;">931-655-9090</a></p>
       <p style="font-style:italic;color:#1b2a4a;">Thank you for your flexibility and your heart for this event.</p>
       <p style="margin-bottom:0;">With gratitude and blessings,<br><strong>Worship On The Mountain</strong></p>
     </div>
@@ -446,6 +493,7 @@ function buildTimeChangeEmail({ name, performance, previousTime, siteUrl }) {
 
 module.exports = {
   buildThankYouEmail,
+  buildDonationThankYouEmail,
   buildArtistThankYouEmail,
   buildArtistApprovalEmail,
   buildLineupEmail,

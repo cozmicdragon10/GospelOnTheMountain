@@ -23,7 +23,109 @@
   </header>
   <main>
     <h1>Donate</h1>
-    <p>Thank you for considering a donation to Worship On The Mountain. Online giving is not set up yet.</p>
+    <section class="goal" aria-labelledby="goal-title" style="margin:32px 0;">
+      <h2 id="goal-title">Our Goal</h2>
+      <!-- Amounts are filled in from /api/goal; the values here are shown only until it loads. -->
+      <p id="goal-summary"><strong id="goal-raised">$0</strong> raised of <strong id="goal-target">$100,000</strong> goal</p>
+      <div role="progressbar" aria-labelledby="goal-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="goal-bar" style="height:14px;border-radius:7px;background:rgba(127,127,127,.25);overflow:hidden;">
+        <div id="goal-fill" style="height:100%;width:0%;background:#2c4170;"></div>
+      </div>
+      <p style="margin-top:20px;">All proceeds will fund Worship On The Mountain. Any remaining funds will go to help mental health in Tennessee.</p>
+    </section>
+    <hr>
+    <p>Thank you for considering a donation to Worship On The Mountain.</p>
+    <section aria-labelledby="give-title" style="margin:24px 0;">
+      <h2 id="give-title">Give online</h2>
+      <form id="donate-form" novalidate>
+        <label>Amount ($)
+          <input name="amount" type="text" inputmode="decimal" placeholder="50.00" required>
+        </label>
+        <label>Your name (optional)
+          <input name="name" type="text" maxlength="150" autocomplete="name">
+        </label>
+        <label>Your email (optional, we will send a thank-you)
+          <input name="email" type="email" maxlength="254" autocomplete="email">
+        </label>
+      </form>
+      <p id="donate-message" role="status"></p>
+      <div id="paypal-buttons" style="max-width:360px;margin-top:12px;"></div>
+      <p id="paypal-test-mode" hidden style="font-size:14px;">Test mode: payments go through PayPal's sandbox, so no real money is charged.</p>
+    </section>
+    <script>
+      (function () {
+        var money = function (cents) { return "$" + Math.round(cents / 100).toLocaleString("en-US"); };
+        var form = document.getElementById("donate-form");
+        var message = document.getElementById("donate-message");
+        var say = function (text) { message.textContent = text; };
+
+        // Fills in the raised total and progress bar from /api/goal.
+        function loadGoal() {
+          return fetch("/api/goal")
+            .then(function (response) { return response.json(); })
+            .then(function (goal) {
+              var pct = goal.targetCents > 0 ? Math.min(100, Math.round((goal.raisedCents / goal.targetCents) * 100)) : 0;
+              document.getElementById("goal-raised").textContent = money(goal.raisedCents);
+              document.getElementById("goal-target").textContent = money(goal.targetCents);
+              document.getElementById("goal-fill").style.width = pct + "%";
+              document.getElementById("goal-bar").setAttribute("aria-valuenow", String(pct));
+            })
+            .catch(function () { /* Keep the default text if the total cannot be loaded. */ });
+        }
+
+        function postJson(url, data) {
+          return fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+              if (!response.ok) throw new Error(body.error || "Something went wrong. Please try again.");
+              return body;
+            });
+          });
+        }
+
+        function startPayPal(config) {
+          if (!config.configured) {
+            say("Online giving is not available right now.");
+            return;
+          }
+          if (config.env === "sandbox") document.getElementById("paypal-test-mode").hidden = false;
+
+          var script = document.createElement("script");
+          script.src = "https://www.paypal.com/sdk/js?client-id=" + encodeURIComponent(config.clientId) + "&currency=USD&intent=capture";
+          script.onload = function () {
+            window.paypal.Buttons({
+              style: { layout: "vertical", label: "donate" },
+              createOrder: function () {
+                say("");
+                var data = Object.fromEntries(new FormData(form));
+                var amount = Number(String(data.amount || "").replace(/[$,\s]/g, ""));
+                if (!(amount > 0)) throw new Error("Please enter an amount greater than $0 before choosing PayPal.");
+                return postJson("/api/donations/paypal/create", data).then(function (body) { return body.orderId; });
+              },
+              onApprove: function (approval) {
+                return postJson("/api/donations/paypal/capture", { orderId: approval.orderID }).then(function () {
+                  form.reset();
+                  say("Thank you for your gift! It has been received.");
+                  return loadGoal();
+                });
+              },
+              onCancel: function () { say("Donation cancelled. No payment was taken."); },
+              onError: function (err) { say(err && err.message ? err.message : "PayPal could not complete the donation. Please try again."); },
+            }).render("#paypal-buttons");
+          };
+          script.onerror = function () { say("PayPal could not be loaded. Please try again later."); };
+          document.head.appendChild(script);
+        }
+
+        loadGoal();
+        fetch("/api/paypal/config")
+          .then(function (response) { return response.json(); })
+          .then(startPayPal)
+          .catch(function () { say("Online giving is not available right now."); });
+      })();
+    </script>
   </main>
   <footer class="psa">
     <p><strong>Billy Graham Prayer Line:</strong> Call <a href="tel:18552557729">855-255-PRAY (7729)</a> to reach someone who will pray with you, 24/7.</p>

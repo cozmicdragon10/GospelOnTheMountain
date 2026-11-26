@@ -26,6 +26,47 @@
     <p><button type="button" id="logout">Log out</button></p>
     <p id="message" role="status"></p>
 
+    <section aria-labelledby="goal-heading">
+      <h2 id="goal-heading">Donations and goal</h2>
+      <p id="goal-status">Loading...</p>
+      <form id="goal-form">
+        <label>Goal amount ($)
+          <input name="goal" type="text" inputmode="decimal" required placeholder="100000">
+        </label>
+        <button type="submit">Update goal</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="add-donation-heading">
+      <h2 id="add-donation-heading">Add a donation</h2>
+      <form id="donation-form">
+        <label>Amount ($)
+          <input name="amount" type="text" inputmode="decimal" required placeholder="50.00">
+        </label>
+        <label>Source
+          <input name="source" type="text" maxlength="100" placeholder="For example: PayPal, cash, check">
+        </label>
+        <label>Donor name (optional)
+          <input name="donor" type="text" maxlength="150">
+        </label>
+        <label>Donor email (optional, sends a thank-you)
+          <input name="email" type="email" maxlength="254">
+        </label>
+        <label>Date received
+          <input name="date" type="date">
+        </label>
+        <label>Note (optional)
+          <textarea name="note" rows="2" maxlength="500"></textarea>
+        </label>
+        <button type="submit">Add donation</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="donations-heading">
+      <h2 id="donations-heading">Recorded donations</h2>
+      <ul id="donations-list" class="needs-list"></ul>
+    </section>
+
     <section aria-labelledby="add-heading">
       <h2 id="add-heading">Add a volunteer need</h2>
       <form id="add-form">
@@ -539,8 +580,83 @@
       }
     }
 
+    // ---------- Donations and goal ----------
+
+    const goalStatusEl = document.getElementById("goal-status");
+    const goalForm = document.getElementById("goal-form");
+    const donationForm = document.getElementById("donation-form");
+    const donationsListEl = document.getElementById("donations-list");
+
+    function money(cents) {
+      return "$" + (cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function renderDonation(d) {
+      const remove = el("button", { type: "button", textContent: "Delete" });
+      remove.addEventListener("click", async () => {
+        if (!confirm(`Delete the donation of ${money(d.amountCents)}?`)) return;
+        try {
+          await api("DELETE", `/api/admin/donations/${d.id}`);
+          say("Donation deleted.");
+          await loadDonations();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      const details = [d.source, d.donor, d.donorEmail, d.donatedOn].filter(Boolean).join(" | ");
+      return el(
+        "li",
+        { className: "need" },
+        el("strong", { textContent: money(d.amountCents) }),
+        el("span", { textContent: details ? " | " + details : "" }),
+        d.note ? el("p", { textContent: d.note }) : "",
+        el("p", {}, remove)
+      );
+    }
+
+    async function loadDonations() {
+      try {
+        const data = await api("GET", "/api/admin/donations");
+        goalStatusEl.textContent = `${money(data.raisedCents)} raised of ${money(data.targetCents)} goal`;
+        goalForm.elements.namedItem("goal").placeholder = String(data.targetCents / 100);
+        donationsListEl.replaceChildren(...data.donations.map(renderDonation));
+        if (!data.donations.length) donationsListEl.append(el("li", { className: "need", textContent: "No donations recorded yet." }));
+      } catch (err) {
+        say(err.message);
+      }
+    }
+
+    goalForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(goalForm));
+      try {
+        await api("PUT", "/api/admin/goal", data);
+        goalForm.reset();
+        say("Goal updated.");
+        await loadDonations();
+      } catch (err) {
+        say(err.message);
+      }
+    });
+
+    donationForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(donationForm));
+      try {
+        const result = await api("POST", "/api/admin/donations", data);
+        donationForm.reset();
+        if (result.thankYou === "sending") say("Donation added. A thank-you email is being sent.");
+        else if (result.thankYou === "not-configured") say("Donation added. Email is not set up, so no thank-you was sent.");
+        else say("Donation added.");
+        await loadDonations();
+      } catch (err) {
+        say(err.message);
+      }
+    });
+
     load();
     loadArtists();
+    loadDonations();
   </script>
 </body>
 </html>

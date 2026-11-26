@@ -13,9 +13,11 @@ try {
   if (err.code !== "ENOENT") console.error("Could not read .env: " + err.message);
 }
 const { sendMail, mailIsConfigured } = require("./mailer");
+const { paypalConfig, paypalIsConfigured, createDonationOrder, captureDonationOrder } = require("./paypal");
 const {
   buildThankYouEmail,
   buildArtistThankYouEmail,
+  buildDonationThankYouEmail,
   buildArtistApprovalEmail,
   buildLineupEmail,
   buildTimeChangeEmail,
@@ -101,6 +103,17 @@ db.exec(`
     position INTEGER NOT NULL DEFAULT 0,
     visible INTEGER NOT NULL DEFAULT 1
   );
+  CREATE TABLE IF NOT EXISTS donations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    source TEXT NOT NULL DEFAULT '',
+    donor TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    donor_email TEXT NOT NULL DEFAULT '',
+    donated_on TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed',
+    paypal_order_id TEXT NOT NULL DEFAULT ''
+  );
 `);
 // Databases created before approval emails need a column recording when one was sent.
 // Artists already approved at that point are marked as handled so they are not emailed after the fact.
@@ -115,6 +128,20 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('performances') WHERE name = 'v
 // Links a performance to an artist record so lineup emails can reach them. Blank means not linked.
 if (!db.prepare("SELECT 1 FROM pragma_table_info('performances') WHERE name = 'artist_id'").get()) {
   db.exec("ALTER TABLE performances ADD COLUMN artist_id INTEGER");
+}
+// Fundraising goal, stored in cents. Defaults to $100,000 until an admin changes it.
+db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('goal_target_cents', '10000000')").run();
+// Donations recorded before donor emails were added need the column.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('donations') WHERE name = 'donor_email'").get()) {
+  db.exec("ALTER TABLE donations ADD COLUMN donor_email TEXT NOT NULL DEFAULT ''");
+}
+// Online (PayPal) donations start as pending and become completed once PayPal confirms the payment.
+// Donations recorded by hand, and any from before this column existed, are completed.
+if (!db.prepare("SELECT 1 FROM pragma_table_info('donations') WHERE name = 'status'").get()) {
+  db.exec("ALTER TABLE donations ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'");
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('donations') WHERE name = 'paypal_order_id'").get()) {
+  db.exec("ALTER TABLE donations ADD COLUMN paypal_order_id TEXT NOT NULL DEFAULT ''");
 }
 
 // Needs listed on the home page, loaded once when the database is first created.
@@ -142,6 +169,12 @@ function buildSnapshot() {
     performances: db
       .prepare("SELECT id, artist, title, time, description, position, visible, artist_id FROM performances ORDER BY id")
       .all(),
+    donations: db
+      .prepare(
+        "SELECT id, amount_cents, source, donor, donor_email, note, donated_on, status, paypal_order_id FROM donations ORDER BY id"
+      )
+      .all(),
+    goalTargetCents: getGoalTargetCents(),
   };
 }
 
@@ -199,6 +232,26 @@ function loadSnapshot(snapshot) {
       const artistId = p.artist_id ?? null;
       insertPerformance.run(p.id, p.artist, p.title || "", p.time || "", p.description || "", p.position || 0, visible, artistId);
     }
+    // Donations and the goal were added later, so older backups may not have them.
+    const insertDonation = db.prepare(
+      "INSERT INTO donations (id, amount_cents, source, donor, donor_email, note, donated_on, status, paypal_order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    for (const d of snapshot.donations || []) {
+      insertDonation.run(
+        d.id,
+        d.amount_cents,
+        d.source || "",
+        d.donor || "",
+        d.donor_email || "",
+        d.note || "",
+        d.donated_on,
+        d.status || "completed",
+        d.paypal_order_id || ""
+      );
+    }
+    if (snapshot.goalTargetCents) {
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('goal_target_cents', ?)").run(String(snapshot.goalTargetCents));
+    }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -227,7 +280,7 @@ const SEED_ARTIST = {
   about:
     "Samuel Kenneth Wright Jr. is a 38-year-old gospel country music artist from Lewisburg, Tennessee, and the organizer of Worship On The Mountain. He grew up tobacco farming, then worked in welding and fabrication, before answering the call of the Lord and Savior Jesus Christ to lead men.\n\n" +
     "He is a father, a brother, an uncle, a cousin, a friend, a husband, and most of all, a man of God. Samuel speaks openly about his own mental health journey, from foster homes to inpatient facilities, and he wants to take the fear of asking for help away from everybody.",
-  email: "outlawlife21@icloud.com",
+  email: "worshiponthemountain@outlook.com",
   role: "both",
   services:
     "Gospel country music performance. Organizing the festival and bringing together the worship groups, choirs, bands and volunteers.",
@@ -381,6 +434,18 @@ function textField(body, key) {
 // ---------- Public volunteer API ----------
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Sends the donation thank-you in the background. Failures are logged and never affect the saved donation.
+function sendDonationThankYou({ email, name, amountCents, donatedOn }) {
+  if (!mailIsConfigured()) {
+    console.log("Donation thank-you skipped: SMTP_USER and SMTP_PASS are not set.");
+    return;
+  }
+  const message = buildDonationThankYouEmail({ name, amountCents, donatedOn });
+  sendMail({ to: email, subject: message.subject, text: message.text, html: message.html, images: message.images })
+    .then(() => console.log(`Donation thank-you sent to ${email}`))
+    .catch((err) => console.error(`Donation thank-you to ${email} failed: ${err.message}`));
+}
 
 // Sends the thank-you email in the background. Failures are logged and never affect the sign-up.
 function sendThankYou({ name, email, needId, details }) {
@@ -653,6 +718,48 @@ function validatePerformance(body) {
   return { artist, title, time, description, artistId };
 }
 
+// ---------- Donations and goal ----------
+
+function getGoalTargetCents() {
+  return Number(db.prepare("SELECT value FROM meta WHERE key = 'goal_target_cents'").get().value);
+}
+
+// Total raised so far, from all recorded donations (PayPal or any other source).
+function goalTotals() {
+  const { total } = db
+    .prepare("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM donations WHERE status = 'completed'")
+    .get();
+  return { targetCents: getGoalTargetCents(), raisedCents: Number(total) };
+}
+
+// Turns "1,250.50" or "$50" into cents. Returns null unless the amount is a positive number.
+function parseDollarsToCents(value) {
+  const text = String(value ?? "").replace(/[$,\s]/g, "");
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(text)) return null;
+  const cents = Math.round(Number(text) * 100);
+  return cents > 0 ? cents : null;
+}
+
+function validateDonation(body) {
+  const amountCents = parseDollarsToCents(body.amount);
+  if (!amountCents) return { error: "Please enter an amount greater than $0 (for example 50 or 50.00)." };
+  const source = textField(body, "source");
+  const donor = textField(body, "donor");
+  const note = textField(body, "note");
+  const donorEmail = textField(body, "email");
+  const donatedOn = textField(body, "date") || new Date().toISOString().slice(0, 10);
+  if (source.length > 100) return { error: "Please keep the source to 100 characters or fewer." };
+  if (donor.length > 150) return { error: "Please keep the donor name to 150 characters or fewer." };
+  if (note.length > 500) return { error: "Please keep the note to 500 characters or fewer." };
+  if (donorEmail && (donorEmail.length > 254 || !EMAIL_PATTERN.test(donorEmail))) {
+    return { error: "Please enter a valid donor email, or leave it blank." };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(donatedOn) || Number.isNaN(Date.parse(donatedOn))) {
+    return { error: "Please enter a valid date." };
+  }
+  return { amountCents, source, donor, donorEmail, note, donatedOn };
+}
+
 function withBody(req, res, handler) {
   readJsonBody(req, 16 * 1024, (err, body) => {
     if (err) {
@@ -844,7 +951,140 @@ function handleAdminApi(req, res, pathname) {
     return;
   }
 
+  if (pathname === "/api/admin/donations" && req.method === "GET") {
+    const donations = db
+      .prepare(
+        "SELECT id, amount_cents, source, donor, donor_email, note, donated_on FROM donations WHERE status = 'completed' ORDER BY donated_on DESC, id DESC"
+      )
+      .all()
+      .map((d) => ({
+        id: d.id,
+        amountCents: d.amount_cents,
+        source: d.source,
+        donor: d.donor,
+        donorEmail: d.donor_email,
+        note: d.note,
+        donatedOn: d.donated_on,
+      }));
+    sendJson(res, 200, { ...goalTotals(), donations });
+    return;
+  }
+
+  if (pathname === "/api/admin/donations" && req.method === "POST") {
+    withBody(req, res, (body) => {
+      const result = validateDonation(body);
+      if (result.error) return sendJson(res, 400, { error: result.error });
+      db.prepare(
+        "INSERT INTO donations (amount_cents, source, donor, donor_email, note, donated_on) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(result.amountCents, result.source, result.donor, result.donorEmail, result.note, result.donatedOn);
+      let thankYou = "none";
+      if (result.donorEmail) {
+        thankYou = mailIsConfigured() ? "sending" : "not-configured";
+        sendDonationThankYou({
+          email: result.donorEmail,
+          name: result.donor,
+          amountCents: result.amountCents,
+          donatedOn: result.donatedOn,
+        });
+      }
+      sendJson(res, 201, { status: "ok", thankYou });
+    });
+    return;
+  }
+
+  const donationMatch = pathname.match(/^\/api\/admin\/donations\/(\d+)$/);
+  if (donationMatch && req.method === "DELETE") {
+    const changed = db.prepare("DELETE FROM donations WHERE id = ?").run(Number(donationMatch[1])).changes;
+    if (!changed) return sendJson(res, 404, { error: "That donation no longer exists." });
+    sendJson(res, 200, { status: "ok" });
+    return;
+  }
+
+  if (pathname === "/api/admin/goal" && req.method === "PUT") {
+    withBody(req, res, (body) => {
+      const cents = parseDollarsToCents(body.goal);
+      if (!cents) return sendJson(res, 400, { error: "Please enter a goal amount greater than $0." });
+      db.prepare("UPDATE meta SET value = ? WHERE key = 'goal_target_cents'").run(String(cents));
+      sendJson(res, 200, { status: "ok" });
+    });
+    return;
+  }
+
   sendJson(res, 404, { error: "Unknown admin route" });
+}
+
+// ---------- Online donations (PayPal) ----------
+
+// Largest single online gift. Larger gifts can be recorded by hand in the admin page.
+const ONLINE_DONATION_MAX_CENTS = 1000000;
+
+// Creates a pending donation and a PayPal order for it. The donor approves the order on PayPal's own page.
+function handlePaypalCreate(req, res) {
+  if (!paypalIsConfigured()) return sendJson(res, 503, { error: "Online giving is not set up yet." });
+  withBody(req, res, async (body) => {
+    const result = validateDonation({ amount: body.amount, donor: body.name, email: body.email, source: "PayPal" });
+    if (result.error) return sendJson(res, 400, { error: result.error });
+    if (result.amountCents > ONLINE_DONATION_MAX_CENTS) {
+      return sendJson(res, 400, { error: "Online gifts are limited to $10,000. Please contact us about larger gifts." });
+    }
+    const pending = db
+      .prepare(
+        "INSERT INTO donations (amount_cents, source, donor, donor_email, note, donated_on, status) VALUES (?, 'PayPal', ?, ?, '', ?, 'pending')"
+      )
+      .run(result.amountCents, result.donor, result.donorEmail, result.donatedOn);
+    const donationId = Number(pending.lastInsertRowid);
+    try {
+      const orderId = await createDonationOrder({ amountCents: result.amountCents, donationId });
+      db.prepare("UPDATE donations SET paypal_order_id = ? WHERE id = ?").run(orderId, donationId);
+      sendJson(res, 201, { orderId });
+    } catch (err) {
+      db.prepare("DELETE FROM donations WHERE id = ?").run(donationId);
+      console.error("PayPal order could not be created: " + err.message);
+      sendJson(res, 502, { error: "PayPal could not start the donation. Please try again." });
+    }
+  });
+}
+
+// Confirms an order the donor approved on PayPal. The amount is checked against the donation saved here,
+// never against what the browser sent.
+function handlePaypalCapture(req, res) {
+  if (!paypalIsConfigured()) return sendJson(res, 503, { error: "Online giving is not set up yet." });
+  withBody(req, res, async (body) => {
+    const orderId = textField(body, "orderId");
+    if (!orderId || orderId.length > 64) return sendJson(res, 400, { error: "Missing PayPal order." });
+    const row = db
+      .prepare("SELECT id, amount_cents, donor, donor_email, donated_on, status FROM donations WHERE paypal_order_id = ?")
+      .get(orderId);
+    if (!row) return sendJson(res, 404, { error: "Unknown donation." });
+    if (row.status === "completed") return sendJson(res, 200, { status: "ok" });
+    try {
+      const captured = await captureDonationOrder(orderId);
+      const matches =
+        captured.status === "COMPLETED" &&
+        (!captured.customId || captured.customId === String(row.id)) &&
+        captured.amountCents === row.amount_cents &&
+        captured.currency === "USD";
+      if (!matches) {
+        db.prepare("UPDATE donations SET status = 'failed' WHERE id = ?").run(row.id);
+        console.error(`PayPal order ${orderId} did not match donation ${row.id}: ${JSON.stringify(captured)}`);
+        return sendJson(res, 409, { error: "The payment could not be confirmed. Please contact us before trying again." });
+      }
+      db.prepare("UPDATE donations SET status = 'completed' WHERE id = ?").run(row.id);
+      if (row.donor_email) {
+        sendDonationThankYou({
+          email: row.donor_email,
+          name: row.donor,
+          amountCents: row.amount_cents,
+          donatedOn: row.donated_on,
+        });
+      }
+      dumpToJson();
+      sendJson(res, 200, { status: "ok" });
+    } catch (err) {
+      console.error("PayPal capture failed: " + err.message);
+      sendJson(res, 502, { error: "PayPal could not confirm the payment. Please try again." });
+    }
+  });
 }
 
 // ---------- Other API routes ----------
@@ -861,6 +1101,17 @@ function handleApi(req, res, pathname) {
   // Performance lineup plus approved artists. Email and needs stay private to the admin page.
   if (pathname === "/api/artists") {
     sendJson(res, 200, { performances: stmt.listVisiblePerformances.all(), artists: stmt.listApprovedArtists.all() });
+    return;
+  }
+  // Public settings the donate page needs to load PayPal. The client ID is public; the secret never leaves the server.
+  if (pathname === "/api/paypal/config") {
+    const config = paypalConfig();
+    sendJson(res, 200, { configured: paypalIsConfigured(), clientId: config.clientId, env: config.env });
+    return;
+  }
+  // Public fundraising total for the donate page. Donor names and amounts per donation stay private.
+  if (pathname === "/api/goal") {
+    sendJson(res, 200, goalTotals());
     return;
   }
   sendJson(res, 404, { error: "Unknown API route" });
@@ -970,6 +1221,16 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && pathname === "/api/deploy") {
     handleDeploy(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/donations/paypal/create") {
+    handlePaypalCreate(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/donations/paypal/capture") {
+    handlePaypalCapture(req, res);
     return;
   }
 

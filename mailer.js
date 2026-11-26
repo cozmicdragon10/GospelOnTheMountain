@@ -2,8 +2,11 @@
 //   SMTP_USER (required), SMTP_PASS (required; for Gmail, use an app password)
 //   SMTP_HOST (default smtp.gmail.com), SMTP_PORT (default 465)
 //   MAIL_FROM (default SMTP_USER), MAIL_FROM_NAME (default "Worship On The Mountain")
+//   Replies go to REPLY_TO below (Reply-To header); the From address stays as configured.
 // Port 465 connects over implicit TLS. Other ports connect in plain text and must upgrade with STARTTLS.
 const nodemailer = require("nodemailer");
+
+const REPLY_TO = "worshiponthemountain@outlook.com";
 
 function mailConfig() {
   const user = process.env.SMTP_USER || "";
@@ -49,6 +52,7 @@ async function sendMail({ to, subject, text, html, images = [] }) {
 
   return getTransport(config).sendMail({
     from: { name: config.fromName, address: config.from },
+    replyTo: REPLY_TO,
     to,
     subject,
     text,
